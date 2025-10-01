@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Taíno Conuco</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif;
+            background: #f5f1e8;
+            padding: 5px;
+            overflow-x: hidden;
+        }
+        .container {
+            background: white;
+            border: 2px solid #333;
+            padding: 8px;
+            max-width: 100vw;
+        }
+        h1 { font-size: 13px; text-align: center; margin-bottom: 8px; }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        
+        button {
+            padding: 10px;
+            background: #4a4a4a;
+            color: white;
+            border: none;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        button:active { background: #666; }
+        
+        .coords {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 5px;
+            margin-bottom: 8px;
+            font-size: 9px;
+        }
+        
+        .coord-item {
+            background: #f9f9f9;
+            padding: 4px;
+            border-left: 2px solid #666;
+        }
+        
+        .coord-item strong { display: block; margin-bottom: 2px; }
+        .coord-item input { 
+            width: 40px; 
+            padding: 2px; 
+            font-size: 10px;
+            border: 1px solid #ccc;
+        }
+        
+        .measurements {
+            background: #fffde7;
+            padding: 6px;
+            margin-bottom: 8px;
+            font-size: 9px;
+            border-left: 2px solid #daa520;
+        }
+        
+        .measurements div { margin: 2px 0; }
+        .live { color: #0066cc; font-weight: bold; }
+        
+        #canvasWrapper {
+            width: 100%;
+            height: 50vh;
+            min-height: 300px;
+            border: 2px solid #333;
+            background: white;
+            overflow: scroll;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Taíno Conuco Layout</h1>
+        
+        <div class="controls">
+            <button onclick="applyCoordinates()">Apply</button>
+            <button onclick="resetToDefault()">Reset</button>
+            <button onclick="resetToZero()">Center</button>
+            <button onclick="toggleGrid()">Grid</button>
+        </div>
+        
+        <div class="coords" id="coordInputs"></div>
+        <div class="measurements" id="measurements"></div>
+        
+        <div id="canvasWrapper">
+            <canvas id="canvas" width="700" height="800"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const SCALE = 10;
+        const CENTER_X = 350;
+        const CENTER_Y = 400;
+        
+        let showGrid = true;
+        let dragging = null;
+        let offsetX = 0, offsetY = 0;
+        let elements = [];
+        
+        const defaultCoords = {
+            barn: {x: -270, y: 60},
+            house: {x: 100, y: 60},
+            planter: {x: -170, y: -240},
+            conuco: {x: 10, y: -170},
+            yopo: {x: -5, y: -105},
+            septic: {x: -150, y: 280},
+            palm: {x: 130, y: 250}
+        };
+        
+        function createCoordInputs() {
+            document.getElementById('coordInputs').innerHTML = Object.keys(defaultCoords).map(id => `
+                <div class="coord-item">
+                    <strong>${id[0].toUpperCase()}${id.slice(1)}</strong>
+                    X:<input type="number" id="${id}X" value="${defaultCoords[id].x}">
+                    Y:<input type="number" id="${id}Y" value="${defaultCoords[id].y}">
+                </div>
+            `).join('');
+        }
+        
+        function createElement() {
+            const get = (id, axis) => parseInt(document.getElementById(`${id}${axis}`).value) + (axis === 'X' ? CENTER_X : CENTER_Y);
+            
+            elements = [
+                { id: 'barn', type: 'rect', x: get('barn','X'), y: get('barn','Y'), width: 180, height: 160, color: '#d4c5a0', label: 'BARN' },
+                { id: 'house', type: 'rect', x: get('house','X'), y: get('house','Y'), width: 160, height: 160, color: '#e8dcc8', label: 'House' },
+                { id: 'planter', type: 'rect', x: get('planter','X'), y: get('planter','Y'), width: 80, height: 50, color: '#c07860', label: 'Planter' },
+                { id: 'conuco', type: 'circle', x: get('conuco','X'), y: get('conuco','Y'), radius: 50, color: '#8b7355', label: 'CONUCO' },
+                { id: 'yopo', type: 'rect', x: get('yopo','X'), y: get('yopo','Y'), width: 30, height: 30, color: '#4a4a4a', label: 'Y' },
+                { id: 'septic', type: 'circle', x: get('septic','X'), y: get('septic','Y'), radius: 35, color: '#e0e0e0', label: 'SEPTIC', dash: true },
+                { id: 'palm', type: 'special', x: get('palm','X'), y: get('palm','Y'), radius: 15, color: '#8b7355', label: 'Palm' }
+            ];
+            
+            const conuco = elements.find(e => e.id === 'conuco');
+            [[-30,35],[-15,45],[15,45],[30,35],[0,48],[48,0],[-48,0],[0,-48]].forEach((pos, i) => {
+                elements.push({ id: `cassava${i+1}`, type: 'circle', x: conuco.x + pos[0], y: conuco.y + pos[1], radius: 6, color: '#228b22', label: '' });
+            });
+            
+            updateMeasurements();
+        }
+        
+        function updateMeasurements() {
+            const get = (id) => elements.find(e => e.id === id);
+            const dist = (e1, e2) => Math.sqrt(Math.pow(e1.x - e2.x, 2) + Math.pow(e1.y - e2.y, 2)) / SCALE;
+            
+            const barn = get('barn'), house = get('house'), planter = get('planter');
+            const conuco = get('conuco'), septic = get('septic'), palm = get('palm');
+            
+            document.getElementById('measurements').innerHTML = `
+                <div>Barn → Planter: <span class="live">${dist(barn, planter).toFixed(1)}</span> ft</div>
+                <div>Barn → Septic: <span class="live">${dist(barn, septic).toFixed(1)}</span> ft</div>
+                <div>Barn → House: <span class="live">${(Math.abs(house.x - (barn.x + barn.width)) / SCALE).toFixed(1)}</span> ft</div>
+                <div>Conuco → Septic: <span class="live">${((dist(conuco, septic) * SCALE - conuco.radius - septic.radius) / SCALE).toFixed(1)}</span> ft</div>
+            `;
+        }
+        
+        function updateInputs() {
+            elements.forEach(el => {
+                const xInput = document.getElementById(`${el.id}X`);
+                const yInput = document.getElementById(`${el.id}Y`);
+                if (xInput) xInput.value = Math.round(el.x - CENTER_X);
+                if (yInput) yInput.value = Math.round(el.y - CENTER_Y);
+            });
+        }
+        
+        function drawGrid() {
+            if (!showGrid) return;
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 1;
+            for (let x = 0; x <= 700; x += 100) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 800); ctx.stroke();
+            }
+            for (let y = 0; y <= 800; y += 100) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(700, y); ctx.stroke();
+            }
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(CENTER_X, 0); ctx.lineTo(CENTER_X, 800); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, CENTER_Y); ctx.lineTo(700, CENTER_Y); ctx.stroke();
+        }
+        
+        function drawElement(el) {
+            if (el.type === 'rect') {
+                ctx.fillStyle = el.color;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.fillRect(el.x, el.y, el.width, el.height);
+                ctx.strokeRect(el.x, el.y, el.width, el.height);
+                if (el.label) {
+                    ctx.fillStyle = '#000';
+                    ctx.font = 'bold 11px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(el.label, el.x + el.width/2, el.y + el.height/2 + 4);
+                }
+            } else if (el.type === 'circle') {
+                ctx.fillStyle = el.color;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = el.radius > 10 ? 2 : 1;
+                if (el.dash) ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.arc(el.x, el.y, el.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.setLineDash([]);
+                if (el.label) {
+                    ctx.fillStyle = '#000';
+                    ctx.font = '9px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(el.label, el.x, el.y + 3);
+                }
+            } else if (el.type === 'special') {
+                ctx.fillStyle = el.color;
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.ellipse(el.x, el.y, 12, 20, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, 700, 800);
+            ctx.fillStyle = '#333';
+            ctx.font = '11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('NORTH', CENTER_X, 20);
+            ctx.fillText('SOUTH', CENTER_X, 780);
+            drawGrid();
+            elements.forEach(drawElement);
+        }
+        
+        function getElementAt(x, y) {
+            for (let i = elements.length - 1; i >= 0; i--) {
+                const el = elements[i];
+                if (el.type === 'rect' && x >= el.x && x <= el.x + el.width && y >= el.y && y <= el.y + el.height) return el;
+                if ((el.type === 'circle' || el.type === 'special') && Math.sqrt(Math.pow(x - el.x, 2) + Math.pow(y - el.y, 2)) <= el.radius + 20) return el;
+            }
+            return null;
+        }
+        
+        function handleStart(e) {
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches ? e.touches[0] : e;
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            dragging = getElementAt(x, y);
+            if (dragging) {
+                e.preventDefault();
+                offsetX = x - dragging.x;
+                offsetY = y - dragging.y;
+            }
+        }
+        
+        function handleMove(e) {
+            if (!dragging) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches ? e.touches[0] : e;
+            dragging.x = touch.clientX - rect.left - offsetX;
+            dragging.y = touch.clientY - rect.top - offsetY;
+            updateInputs();
+            updateMeasurements();
+            draw();
+        }
+        
+        function handleEnd(e) {
+            if (dragging) e.preventDefault();
+            dragging = null;
+        }
+        
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        canvas.addEventListener('touchend', handleEnd, { passive: false });
+        
+        function applyCoordinates() { createElement(); draw(); }
+        function resetToDefault() {
+            Object.entries(defaultCoords).forEach(([key, coords]) => {
+                document.getElementById(`${key}X`).value = coords.x;
+                document.getElementById(`${key}Y`).value = coords.y;
+            });
+            createElement(); draw();
+        }
+        function resetToZero() {
+            ['barn', 'house', 'planter', 'conuco', 'yopo', 'septic', 'palm'].forEach(id => {
+                document.getElementById(`${id}X`).value = 0;
+                document.getElementById(`${id}Y`).value = 0;
+            });
+            createElement(); draw();
+        }
+        function toggleGrid() { showGrid = !showGrid; draw(); }
+        
+        createCoordInputs();
+        createElement();
+        draw();
+    </script>
+</body>
+</html>
