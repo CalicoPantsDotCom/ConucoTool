@@ -3,39 +3,56 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes, viewport-fit=cover" />
-<title>Taíno Conuco Layout • v6.1</title>
+<title>Taíno Conuco Layout • v6.2</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{--gap:10px;--radius:10px}
   body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#f5f1e8;color:#222;line-height:1.3;padding:var(--gap)}
-  .container{width:min(100%,920px);margin-inline:auto;background:#fff;border:2px solid #333;padding:var(--gap);border-radius:var(--radius)}
+  .container{width:min(100%,980px);margin-inline:auto;background:#fff;border:2px solid #333;padding:var(--gap);border-radius:var(--radius)}
   h1{font-size:clamp(14px,3.8vw,20px);text-align:center;margin-bottom:4px}
   .badge{font-size:11px;color:#666;text-align:center;margin-bottom:8px}
-  .hint{font-size:12px;color:#444;margin-bottom:8px;text-align:left}
-  .controls{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px}
-  @media (max-width:640px){.controls{grid-template-columns:repeat(3,1fr)}}
-  button{padding:12px;background:#4a4a4a;color:#fff;border:0;border-radius:8px;font-size:clamp(11px,3.2vw,14px);cursor:pointer;touch-action:manipulation}
+  .row{display:grid;gap:8px;margin-bottom:8px}
+  .controls{grid-template-columns:repeat(5,1fr)}
+  .tools{grid-template-columns:repeat(6,1fr)}
+  @media (max-width:720px){.controls{grid-template-columns:repeat(3,1fr)} .tools{grid-template-columns:repeat(3,1fr)}}
+  button{padding:10px;background:#4a4a4a;color:#fff;border:0;border-radius:8px;font-size:clamp(11px,3.2vw,14px);cursor:pointer;touch-action:manipulation}
   button:active{background:#666}
   .measurements{background:#fffde7;padding:8px;margin-bottom:10px;font-size:12px;border-left:3px solid #daa520;border-radius:6px;min-height:20px}
   .live{color:#06c;font-weight:700}
   #canvasWrapper{width:100%;height:min(62dvh,560px);min-height:260px;border:2px solid #333;background:#fff;overflow:hidden;position:relative;border-radius:var(--radius)}
   canvas{display:block;width:100%;height:100%;touch-action:none}
   #miniMap{position:absolute;right:8px;bottom:8px;width:140px;height:100px;border:1px solid #333;background:#ffffffcc;border-radius:6px;touch-action:none}
+  .hint{font-size:12px;color:#444;margin-bottom:8px}
+  .field{display:flex;align-items:center;gap:8px;background:#f6f6f6;border:1px solid #ddd;border-radius:8px;padding:6px 8px}
+  .field input[type=number]{width:68px;padding:6px 5px;border:1px solid #ccc;border-radius:6px}
+  .field input[type=checkbox]{transform:scale(1.1)}
 </style>
 </head>
 <body>
   <div class="container">
     <h1>Taíno Conuco Layout Tool</h1>
-    <div class="badge">build v6.1 • research defaults (9 ft mound, 2 cassava) • crisp text • resizable shapes • pinch+zoom • inertia • fit • minimap</div>
-    <div class="controls">
+    <div class="badge">build v6.2 • crisp text • resizable shapes • pinch+zoom • inertia • Fit • full-viewport grid • add shapes • cassava ring lock</div>
+
+    <div class="row controls">
       <button id="applyBtn">Apply</button>
       <button id="resetBtn">Reset</button>
       <button id="centerBtn">Center</button>
       <button id="gridBtn">Grid</button>
       <button id="fitBtn">Fit</button>
     </div>
-    <div class="hint">Drag shapes to move. Drag handles to resize (rect: 8 handles, circle: radius handle). Double-tap to zoom.</div>
+
+    <div class="row tools">
+      <div class="field"><label for="cassCount">Cassava count</label><input id="cassCount" type="number" min="0" max="24" step="1" value="8"></div>
+      <div class="field"><label for="lockCass">Lock to Conuco</label><input id="lockCass" type="checkbox" checked></div>
+      <button id="addRectBtn">Add Rect</button>
+      <button id="addCircleBtn">Add Circle</button>
+      <button id="delSelectedBtn">Delete Selected</button>
+      <button id="clearCassBtn">Clear Cassava</button>
+    </div>
+
+    <div class="hint">Drag shapes to move. Drag handles to resize (rect: 8 handles; circle: radius handle). Double-tap to zoom. Click “Add Rect/Circle” then click the canvas to place and label.</div>
     <div class="measurements" id="measurements">Loading…</div>
+
     <div id="canvasWrapper">
       <canvas id="canvas"></canvas>
       <canvas id="miniMap"></canvas>
@@ -43,130 +60,167 @@
   </div>
 
 <script>
-/* ---------- Basics ---------- */
+/* ---------- Utilities & globals ---------- */
 if(!Math.hypot){Math.hypot=function(x,y){return Math.sqrt(x*x+y*y)}}
+
 var canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d',{alpha:true});
 var wrapper=document.getElementById('canvasWrapper');
 var mini=document.getElementById('miniMap'), mctx=mini.getContext('2d');
+var dpr=function(){return Math.max(1,window.devicePixelRatio||1)}; // helper
 
-var SCALE=10; // px per foot for measurements
+var SCALE=10; // px per foot (for distance readouts only)
 var CENTER_X=350, CENTER_Y=400, showGrid=true;
 
 var panX=0, panY=0, viewScale=1, MIN_SCALE=0.5, MAX_SCALE=4;
+
 var dragging=null, dragOffX=0, dragOffY=0;
 var resizing=null; // {el, kind:'rect'|'circle', handle:'n'|'s'|'e'|'w'|'ne'...'cRadius'}
+var selected=null;
 var panning=false, panStartX=0, panStartY=0;
 var pinching=false, pinchStartDist=0, pinchStartScale=1, pinchFocalX=0, pinchFocalY=0;
 var inertiaVX=0, inertiaVY=0, inertiaId=0, lastMoveTime=0, lastMoveX=0, lastMoveY=0, lastTap=0;
 
+var addMode=null; // 'rect'|'circle'|null
+
+// elements store
 var elements=[];
 
-/* ---------- Research defaults ---------- */
-/* 9 ft diameter conuco -> radius = 4.5 ft -> 45 px */
+/* ---------- Defaults (researched) ---------- */
 var defaults = {
-  barn:    { x:-260, y:  40, w:180, h:140, label:'BARN'  },
-  house:   { x: 130, y:  40, w:160, h:160, label:'HOUSE' },
-  planter: { x:-160, y:-210, w: 90, h: 60, label:'PLANTER' },
-  septic:  { x:-150, y: 270, r: 40, label:'SEPTIC' }, // 4 ft-ish radius
-  conuco:  { x:  20, y:-160, r: 45, label:'CONUCO' },
-  yopo:    { x:  -5, y:-105, w: 30, h: 30, label:'Y'     },
-  palm:    { x: 130, y: 240, r: 18, label:'PALM', special:true }
+  barn:    { x:-260, y:  40, w:180, h:140, label:'BARN',  color:'#d4c5a0' },
+  house:   { x: 130, y:  40, w:160, h:160, label:'HOUSE', color:'#e8dcc8' },
+  planter: { x:-160, y:-210, w: 90, h: 60, label:'PLANTER', color:'#c07860' },
+  septic:  { x:-150, y: 270, r: 40, label:'SEPTIC', color:'#e0e0e0', dash:true },
+  conuco:  { x:  20, y:-160, r: 45, label:'CONUCO', color:'#8b7355' },
+  yopo:    { x:  -5, y:-105, w: 30, h: 30, label:'Y', color:'#4a4a4a' },
+  palm:    { x: 130, y: 240, r: 18, label:'PALM', color:'#8b7355', special:true }
 };
 
-/* ---------- UI wiring ---------- */
-document.getElementById('applyBtn').onclick = function(){ createElements(); draw(); };
-document.getElementById('resetBtn').onclick = resetToResearch;
-document.getElementById('centerBtn').onclick = function(){ panX=panY=0; viewScale=1; draw(); };
-document.getElementById('gridBtn').onclick = function(){ showGrid=!showGrid; draw(); };
-document.getElementById('fitBtn').onclick = fitToExtents;
+/* ---------- DOM hooks ---------- */
+var applyBtn=document.getElementById('applyBtn');
+var resetBtn=document.getElementById('resetBtn');
+var centerBtn=document.getElementById('centerBtn');
+var gridBtn=document.getElementById('gridBtn');
+var fitBtn=document.getElementById('fitBtn');
+var cassCountInput=document.getElementById('cassCount');
+var lockCassInput=document.getElementById('lockCass');
+var addRectBtn=document.getElementById('addRectBtn');
+var addCircleBtn=document.getElementById('addCircleBtn');
+var delSelectedBtn=document.getElementById('delSelectedBtn');
+var clearCassBtn=document.getElementById('clearCassBtn');
 
-/* ---------- Element creation ---------- */
-function createElements(){
-  elements = [
-    rectEl('barn',  defaults.barn),
-    rectEl('house', defaults.house),
-    rectEl('planter', defaults.planter),
-    circleEl('septic', defaults.septic, true),
-    circleEl('conuco', defaults.conuco, false),
-    rectEl('yopo', defaults.yopo),
-    specialPalm('palm', defaults.palm)
-  ];
-
-  // Place TWO cassava nodes on conuco rim @ 0° and 180°
-  var c = elements.filter(function(e){return e.id==='conuco'})[0];
-  var ring = c.r - 6;
-  var offs = [[ ring,0],[-ring,0]];
-  for (var i=0;i<offs.length;i++){
-    elements.push({ id:'cassava'+(i+1), type:'circle', x:c.x+offs[i][0]+CENTER_X, y:c.y+offs[i][1]+CENTER_Y,
-      r:6, color:'#228b22', label:'', draggable:true, resizable:false });
-  }
-
-  updateMeasurements();
-}
-
+/* ---------- Elements management ---------- */
 function worldX(dx){return CENTER_X+dx}
 function worldY(dy){return CENTER_Y+dy}
 
 function rectEl(id, o){
-  return { id:id, type:'rect', x:worldX(o.x), y:worldY(o.y), w:o.w, h:o.h,
-    color:(id==='house'?'#e8dcc8':id==='barn'?'#d4c5a0':id==='planter'?'#c07860':'#4a4a4a'),
-    label:o.label, draggable:true, resizable:true };
+  return { id:id||('rect'+Math.random().toString(36).slice(2,7)), type:'rect',
+    x:worldX(o.x), y:worldY(o.y), w:o.w, h:o.h,
+    color:o.color||'#ddd', label:o.label||'RECT', draggable:true, resizable:true };
 }
-function circleEl(id, o, dashed){
-  return { id:id, type:'circle', x:worldX(o.x), y:worldY(o.y), r:o.r,
-    color:(id==='conuco'?'#8b7355':'#e0e0e0'), label:o.label, draggable:true, resizable:true, dash:!!dashed };
+function circleEl(id, o){
+  return { id:id||('circle'+Math.random().toString(36).slice(2,7)), type:'circle',
+    x:worldX(o.x), y:worldY(o.y), r:o.r||30,
+    color:o.color||'#ddd', label:o.label||'CIRCLE', draggable:true, resizable:true, dash:!!o.dash };
 }
 function specialPalm(id, o){
-  return { id:id, type:'special', x:worldX(o.x), y:worldY(o.y), r:o.r, color:'#8b7355',
+  return { id:id, type:'special', x:worldX(o.x), y:worldY(o.y), r:o.r, color:o.color,
     label:o.label, draggable:true, resizable:false };
+}
+
+function createDefaults(){
+  elements = [
+    rectEl('barn',  defaults.barn),
+    rectEl('house', defaults.house),
+    rectEl('planter', defaults.planter),
+    circleEl('septic', defaults.septic),
+    circleEl('conuco', defaults.conuco),
+    rectEl('yopo', defaults.yopo),
+    specialPalm('palm', defaults.palm)
+  ];
+  // initial cassava from control value
+  rebuildCassava(parseInt(cassCountInput.value,10) || 0);
+  updateMeasurements();
+}
+
+function get(id){ for(var i=0;i<elements.length;i++){ if(elements[i].id===id) return elements[i]; } }
+
+/* ---------- Cassava helpers ---------- */
+function removeCassava(){
+  elements = elements.filter(function(e){ return !/^cassava/.test(e.id); });
+}
+function rebuildCassava(n){
+  removeCassava();
+  if (n<=0) return;
+  var c = get('conuco'); if (!c) return;
+  var radius = Math.max(8, c.r - 6); // place on rim (slightly in)
+  for (var i=0;i<n;i++){
+    var ang = (i / n) * Math.PI * 2;
+    var dx = Math.cos(ang) * radius;
+    var dy = Math.sin(ang) * radius;
+    elements.push({ id:'cassava'+(i+1), type:'circle', x:c.x+dx, y:c.y+dy, r:6, color:'#228b22', label:'', draggable:true, resizable:false, cassava:true });
+  }
 }
 
 /* ---------- Measurements ---------- */
 function updateMeasurements(){
   var m=document.getElementById('measurements');
-  function get(id){for(var i=0;i<elements.length;i++) if(elements[i].id===id) return elements[i]}
   function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y)/SCALE}
-  var barn=get('barn'), house=get('house'), planter=get('planter'),
-      conuco=get('conuco'), septic=get('septic'), palm=get('palm');
-
+  var barn=get('barn'), house=get('house'), planter=get('planter'), conuco=get('conuco'), septic=get('septic'), palm=get('palm');
+  if(!(barn&&house&&planter&&conuco&&septic&&palm)){ m.textContent=''; return; }
   m.innerHTML =
     '<div>Barn → Planter: <span class="live">'+dist(barn,planter).toFixed(1)+'</span> ft</div>'+
     '<div>Barn → Septic: <span class="live">'+dist(barn,septic).toFixed(1)+'</span> ft</div>'+
     '<div>Barn → House (gap): <span class="live">'+(Math.abs(house.x-(barn.x+barn.w))/SCALE).toFixed(1)+'</span> ft</div>'+
     '<div>House → Palm: <span class="live">'+dist(house,palm).toFixed(1)+'</span> ft</div>'+
-    '<div>Conuco radius: <span class="live">'+(conuco.r/SCALE).toFixed(1)+'</span> ft</div>';
+    '<div>Conuco radius: <span class="live">'+(conuco.r/SCALE).toFixed(1)+'</span> ft</div>'+
+    '<div>Cassava count: <span class="live">'+(elements.filter(e=>e.cassava).length)+'</span></div>';
 }
 
 /* ---------- Drawing ---------- */
+function currentViewWorldBounds(){
+  var rect=canvas.getBoundingClientRect(), w=rect.width, h=rect.height;
+  var tlx=(-panX)/viewScale, tly=(-panY)/viewScale;
+  var brx=(w - panX)/viewScale, bry=(h - panY)/viewScale;
+  return {minX:tlx, minY:tly, maxX:brx, maxY:bry};
+}
+
 function draw(){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
-  // Clear
+  var ratio=dpr();
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // Apply world transform
-  ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,dpr*panX,dpr*panY);
+  // world transform
+  ctx.setTransform(ratio*viewScale,0,0,ratio*viewScale, ratio*panX, ratio*panY);
 
-  var w=canvas.width/dpr, h=canvas.height/dpr;
+  drawGridWorld();
 
-  if (showGrid){
-    ctx.strokeStyle='#ddd'; ctx.lineWidth=1/viewScale;
-    for (var x=0;x<=w;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}
-    for (var y=0;y<=h;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
-    ctx.strokeStyle='#999'; ctx.lineWidth=2/viewScale;
-    ctx.beginPath();ctx.moveTo(CENTER_X,0);ctx.lineTo(CENTER_X,h);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(0,CENTER_Y);ctx.lineTo(w,CENTER_Y);ctx.stroke();
-  }
-
-  // Shapes
   for(var i=0;i<elements.length;i++) drawElement(elements[i]);
 
-  // Crisp labels in screen space
   drawLabelsCrisp();
-
-  // Resize handles on selected/resizable shapes
   drawHandles();
-
   drawMiniMap();
+}
+
+function drawGridWorld(){
+  if(!showGrid) return;
+  var vb=currentViewWorldBounds();
+  var step=100; // px in world
+  var startX=Math.floor((vb.minX- step*4)/step)*step;
+  var endX  =Math.ceil ((vb.maxX+ step*4)/step)*step;
+  var startY=Math.floor((vb.minY- step*4)/step)*step;
+  var endY  =Math.ceil ((vb.maxY+ step*4)/step)*step;
+
+  ctx.strokeStyle='#ddd';
+  ctx.lineWidth=1/viewScale;
+
+  for(var x=startX; x<=endX; x+=step){ ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke(); }
+  for(var y=startY; y<=endY; y+=step){ ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke(); }
+
+  // axes
+  ctx.strokeStyle='#999';
+  ctx.lineWidth=2/viewScale;
+  ctx.beginPath(); ctx.moveTo(CENTER_X, startY); ctx.lineTo(CENTER_X, endY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(startX, CENTER_Y); ctx.lineTo(endX, CENTER_Y); ctx.stroke();
 }
 
 function drawElement(el){
@@ -177,7 +231,7 @@ function drawElement(el){
     ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=(el.r>10?2:1)/viewScale;
     if(el.dash) ctx.setLineDash([5/viewScale,5/viewScale]);
     ctx.beginPath(); ctx.arc(el.x,el.y,el.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
-  } else { // special palm (trunk + fronds)
+  } else if(el.type==='special'){
     ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=2/viewScale;
     ctx.beginPath(); ctx.ellipse(el.x,el.y,12,20,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='#2d5016';
@@ -186,95 +240,70 @@ function drawElement(el){
   }
 }
 
-/* ---------- Crisp text (screen-space) ---------- */
-function worldToScreen(wx,wy){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
-  return { x:(wx*viewScale+panX)*dpr, y:(wy*viewScale+panY)*dpr };
-}
+/* Crisp, zoom-proof labels */
+function worldToScreen(wx,wy){ return { x:(wx*viewScale+panX)*dpr(), y:(wy*viewScale+panY)*dpr() }; }
 function drawLabelsCrisp(){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
-  ctx.setTransform(1,0,0,1,0,0); // screen space
-  ctx.textAlign='center';
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.textAlign='center'; ctx.fillStyle='#000';
   for (var i=0;i<elements.length;i++){
     var el=elements[i]; if(!el.label) continue;
-    var centerX = (el.type==='rect') ? el.x + el.w/2 : el.x;
-    var centerY = (el.type==='rect') ? el.y + el.h/2 : el.y;
-    var p = worldToScreen(centerX, centerY + 3/viewScale);
-    var size = (el.type==='rect' ? 12 : (el.r>30?10:9));
-    ctx.fillStyle='#000';
-    ctx.font = 'bold ' + Math.round(size*dpr) + 'px Arial';
+    var cx=(el.type==='rect')? el.x+el.w/2 : el.x;
+    var cy=(el.type==='rect')? el.y+el.h/2 : el.y;
+    var p=worldToScreen(cx, cy + 3/viewScale);
+    var size=(el.type==='rect'?12:(el.r>30?10:9));
+    ctx.font='bold '+Math.round(size*dpr())+'px Arial';
     ctx.fillText(el.label, p.x, p.y);
   }
 }
 
-/* ---------- Resize handles ---------- */
-var HANDLE_SIZE = 7; // screen px
+/* Handles */
+var HANDLE_SIZE=7; // screen px
 function getRectHandles(el){
-  var pts = [
-    {key:'nw', x:el.x,        y:el.y       },
-    {key:'n',  x:el.x+el.w/2, y:el.y       },
-    {key:'ne', x:el.x+el.w,   y:el.y       },
-    {key:'e',  x:el.x+el.w,   y:el.y+el.h/2},
-    {key:'se', x:el.x+el.w,   y:el.y+el.h  },
-    {key:'s',  x:el.x+el.w/2, y:el.y+el.h  },
-    {key:'sw', x:el.x,        y:el.y+el.h  },
-    {key:'w',  x:el.x,        y:el.y+el.h/2}
+  return [
+    {k:'nw',x:el.x,y:el.y},{k:'n',x:el.x+el.w/2,y:el.y},{k:'ne',x:el.x+el.w,y:el.y},
+    {k:'e',x:el.x+el.w,y:el.y+el.h/2},{k:'se',x:el.x+el.w,y:el.y+el.h},
+    {k:'s',x:el.x+el.w/2,y:el.y+el.h},{k:'sw',x:el.x,y:el.y+el.h},{k:'w',x:el.x,y:el.y+el.h/2}
   ];
-  return pts;
 }
 function drawHandles(){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
-  ctx.setTransform(1,0,0,1,0,0); // screen space
-  ctx.lineWidth=1;
+  ctx.setTransform(1,0,0,1,0,0);
   for (var i=0;i<elements.length;i++){
     var el=elements[i]; if(!el.resizable) continue;
-
+    ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
+    if(el===selected){ ctx.fillStyle='#f0fbff'; } // subtle tint on selection
     if(el.type==='rect'){
-      var hs = getRectHandles(el);
-      for (var j=0;j<hs.length;j++){
-        var p = worldToScreen(hs[j].x, hs[j].y);
-        ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
-        ctx.beginPath(); ctx.rect(p.x-HANDLE_SIZE, p.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2);
-        ctx.fill(); ctx.stroke();
-      }
+      var hs=getRectHandles(el);
+      for(var j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
+        ctx.beginPath(); ctx.rect(p.x-HANDLE_SIZE, p.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2); ctx.fill(); ctx.stroke(); }
     } else if(el.type==='circle'){
-      var rim = worldToScreen(el.x+el.r, el.y);
-      ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
-      ctx.beginPath(); ctx.rect(rim.x-HANDLE_SIZE, rim.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2);
-      ctx.fill(); ctx.stroke();
+      var rim=worldToScreen(el.x+el.r, el.y);
+      ctx.beginPath(); ctx.rect(rim.x-HANDLE_SIZE, rim.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2); ctx.fill(); ctx.stroke();
     }
   }
 }
 
-/* Hit-testing handles (screen space rectangles) */
-function hitTestHandle(screenX,screenY){
+/* Hit-test handles (screen space) */
+function hitTestHandle(sx,sy){
   for (var i=elements.length-1;i>=0;i--){
     var el=elements[i]; if(!el.resizable) continue;
-
     if(el.type==='rect'){
       var hs=getRectHandles(el);
-      for (var j=0;j<hs.length;j++){
-        var p=worldToScreen(hs[j].x, hs[j].y);
-        if (Math.abs(screenX-p.x)<=HANDLE_SIZE && Math.abs(screenY-p.y)<=HANDLE_SIZE){
-          return {el:el, kind:'rect', handle:hs[j].key};
-        }
+      for(var j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
+        if(Math.abs(sx-p.x)<=HANDLE_SIZE && Math.abs(sy-p.y)<=HANDLE_SIZE){ return {el:el,kind:'rect',handle:hs[j].k}; }
       }
     } else if(el.type==='circle'){
       var rim=worldToScreen(el.x+el.r, el.y);
-      if (Math.abs(screenX-rim.x)<=HANDLE_SIZE && Math.abs(screenY-rim.y)<=HANDLE_SIZE){
-        return {el:el, kind:'circle', handle:'cRadius'};
-      }
+      if(Math.abs(sx-rim.x)<=HANDLE_SIZE && Math.abs(sy-rim.y)<=HANDLE_SIZE){ return {el:el,kind:'circle',handle:'cRadius'}; }
     }
   }
   return null;
 }
 
-/* ---------- Picking & input ---------- */
+/* Picking */
 function screenToWorld(px,py){ return {x:(px-panX)/viewScale, y:(py-panY)/viewScale}; }
 function getElementAtWorld(x,y){
   for (var i=elements.length-1;i>=0;i--){
     var el=elements[i];
-    if(!el.draggable) continue;
     if(el.type==='rect' && x>=el.x && x<=el.x+el.w && y>=el.y && y<=el.y+el.h) return el;
     if(el.type==='circle' || el.type==='special'){
       var r=(el.r||15); if(Math.hypot(x-el.x,y-el.y)<=r+(el.type==='special'?18:15)) return el;
@@ -284,19 +313,20 @@ function getElementAtWorld(x,y){
 }
 function getCanvasCoordsClient(cx,cy){ var r=canvas.getBoundingClientRect(); return {x:(cx-r.left), y:(cy-r.top)}; }
 
-/* Mouse */
+/* ---------- Input ---------- */
 canvas.addEventListener('mousedown', function(e){
-  var p=getCanvasCoordsClient(e.clientX,e.clientY);
-  // check handles first
-  var h = hitTestHandle(p.x*devicePixelRatio, p.y*devicePixelRatio);
-  if (h){ resizing=h; return; }
+  var p=getCanvasCoordsClient(e.clientX,e.clientY), now=Date.now();
+  // add mode first
+  if(addMode){ placeNewAt(p); return; }
 
-  var w=screenToWorld(p.x,p.y);
-  var el=getElementAtWorld(w.x,w.y);
-  if(el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
-  else { panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=Date.now(); lastMoveX=p.x; lastMoveY=p.y; }
+  var handle=hitTestHandle(p.x*dpr(), p.y*dpr());
+  if(handle){ resizing=handle; selected=handle.el; draw(); return; }
 
-  var now=Date.now(); if(now-lastTap<280){ zoomAt(p.x,p.y,1.6);} lastTap=now;
+  var w=screenToWorld(p.x,p.y), el=getElementAtWorld(w.x,w.y);
+  if(el){ dragging=el; selected=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; draw(); }
+  else { selected=null; panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y; }
+
+  if(now-lastTap<280){ zoomAt(p.x,p.y,1.6); } lastTap=now;
 });
 window.addEventListener('mousemove', function(e){
   var p=getCanvasCoordsClient(e.clientX,e.clientY);
@@ -304,6 +334,7 @@ window.addEventListener('mousemove', function(e){
   if(dragging){
     var w=screenToWorld(p.x,p.y);
     dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY;
+    if(lockCassInput.checked && dragging.id==='conuco'){ rebuildCassava(parseInt(cassCountInput.value,10)||0); }
     updateMeasurements(); draw(); return;
   }
   if(panning){
@@ -319,17 +350,22 @@ window.addEventListener('mouseup', function(){
   dragging=null; panning=false; resizing=null;
 });
 
-/* Touch */
+canvas.addEventListener('wheel', function(e){
+  e.preventDefault(); var p=getCanvasCoordsClient(e.clientX,e.clientY); zoomAt(p.x,p.y, e.deltaY<0 ? 1.1 : 1/1.1);
+},{passive:false});
+
 canvas.addEventListener('touchstart', function(e){
-  var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY);
-  var h=hitTestHandle(p.x*devicePixelRatio, p.y*devicePixelRatio);
-  if (h){ resizing=h; e.preventDefault(); return; }
+  // add mode: place with first tap
+  if(addMode){ var t=e.touches[0]; placeNewAt(getCanvasCoordsClient(t.clientX,t.clientY)); e.preventDefault(); return; }
 
   if(e.touches.length===1){
+    var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY), now=Date.now();
+    var h=hitTestHandle(p.x*dpr(), p.y*dpr());
+    if(h){ resizing=h; selected=h.el; draw(); e.preventDefault(); return; }
     var w=screenToWorld(p.x,p.y), el=getElementAtWorld(w.x,w.y);
-    if(el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
-    else { panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=Date.now(); lastMoveX=p.x; lastMoveY=p.y; }
-    var now=Date.now(); if(now-lastTap<320){ zoomAt(p.x,p.y,1.6); e.preventDefault(); } lastTap=now;
+    if(el){ dragging=el; selected=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; draw(); }
+    else { selected=null; panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y; }
+    if(now-lastTap<320){ zoomAt(p.x,p.y,1.6); e.preventDefault(); } lastTap=now;
   } else if(e.touches.length===2){
     pinching=true; dragging=null; panning=false;
     var a=e.touches[0], b=e.touches[1];
@@ -339,7 +375,6 @@ canvas.addEventListener('touchstart', function(e){
     pinchFocalX=q.x; pinchFocalY=q.y;
   }
 },{passive:false});
-
 canvas.addEventListener('touchmove', function(e){
   if(resizing){ var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY); handleResize(p); e.preventDefault(); return; }
   if(pinching && e.touches.length===2){
@@ -354,6 +389,7 @@ canvas.addEventListener('touchmove', function(e){
     if(dragging){
       var w=screenToWorld(p.x,p.y);
       dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY;
+      if(lockCassInput.checked && dragging.id==='conuco'){ rebuildCassava(parseInt(cassCountInput.value,10)||0); }
       updateMeasurements(); draw();
     } else {
       var now=Date.now();
@@ -364,58 +400,39 @@ canvas.addEventListener('touchmove', function(e){
     }
   }
 },{passive:false});
+canvas.addEventListener('touchend', function(){ if(panning && !pinching) startInertia(); pinching=false; dragging=null; panning=false; resizing=null; });
 
-canvas.addEventListener('touchend', function(){
-  if(panning && !pinching) startInertia();
-  pinching=false; dragging=null; panning=false; resizing=null;
-});
-
-/* Wheel zoom */
-canvas.addEventListener('wheel', function(e){
-  e.preventDefault();
-  var p=getCanvasCoordsClient(e.clientX,e.clientY);
-  zoomAt(p.x,p.y, e.deltaY<0 ? 1.1 : 1/1.1);
-},{passive:false});
-
-/* ---------- Resize logic ---------- */
+/* Resize logic */
 function handleResize(p){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
-  var w = screenToWorld(p.x,p.y);
-  var el = resizing.el;
-
+  var w=screenToWorld(p.x,p.y);
+  var el=resizing.el;
   if(resizing.kind==='rect'){
     var min=20;
-    var left=el.x, right=el.x+el.w, top=el.y, bottom=el.y+el.h;
-
-    function setLeft(nx){ left = Math.min(nx, right-min); el.w = right-left; el.x=left; }
-    function setRight(nx){ right= Math.max(nx, left+min); el.w = right-left; }
-    function setTop(ny){ top = Math.min(ny, bottom-min); el.h = bottom-top; el.y=top; }
-    function setBottom(ny){ bottom= Math.max(ny, top+min); el.h = bottom-top; }
-
+    var L=el.x, R=el.x+el.w, T=el.y, B=el.y+el.h;
+    function setL(nx){ L=Math.min(nx,R-min); el.w=R-L; el.x=L; }
+    function setR(nx){ R=Math.max(nx,L+min); el.w=R-L; }
+    function setT(ny){ T=Math.min(ny,B-min); el.h=B-T; el.y=T; }
+    function setB(ny){ B=Math.max(ny,T+min); el.h=B-T; }
     var h=resizing.handle;
-    if(h.indexOf('w')!==-1) setLeft(w.x);
-    if(h.indexOf('e')!==-1) setRight(w.x);
-    if(h.indexOf('n')!==-1) setTop(w.y);
-    if(h.indexOf('s')!==-1) setBottom(w.y);
-  } else { // circle radius
-    el.r = Math.max(6, Math.abs(w.x - el.x)); // handle along east-west
+    if(h.indexOf('w')!==-1) setL(w.x);
+    if(h.indexOf('e')!==-1) setR(w.x);
+    if(h.indexOf('n')!==-1) setT(w.y);
+    if(h.indexOf('s')!==-1) setB(w.y);
+  } else { // circle radius drag (east handle)
+    el.r = Math.max(6, Math.abs(w.x - el.x));
+    if(lockCassInput.checked && el.id==='conuco'){ rebuildCassava(parseInt(cassCountInput.value,10)||0); }
   }
   updateMeasurements(); draw();
 }
 
-/* ---------- Zoom helpers ---------- */
+/* Zoom helpers + inertia */
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 function setZoomAt(fx,fy,newScale){
   newScale=clamp(newScale,MIN_SCALE,MAX_SCALE);
   var worldX=(fx - panX)/viewScale, worldY=(fy - panY)/viewScale;
-  viewScale=newScale;
-  panX = fx - worldX*viewScale;
-  panY = fy - worldY*viewScale;
-  draw();
+  viewScale=newScale; panX = fx - worldX*viewScale; panY = fy - worldY*viewScale; draw();
 }
 function zoomAt(fx,fy,factor){ setZoomAt(fx,fy,viewScale*factor); }
-
-/* ---------- Inertia ---------- */
 function startInertia(){
   if(inertiaId) cancelAnimationFrame(inertiaId);
   var decay=0.92, minSpeed=0.02, last=performance.now();
@@ -424,13 +441,12 @@ function startInertia(){
     panX += inertiaVX*16.67*dt; panY += inertiaVY*16.67*dt;
     inertiaVX *= Math.pow(decay,dt); inertiaVY *= Math.pow(decay,dt);
     draw();
-    if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step);
-    else inertiaId=0;
+    if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step); else inertiaId=0;
   }
   if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step);
 }
 
-/* ---------- Mini-map & Fit ---------- */
+/* Mini-map + Fit */
 function getWorldBounds(){
   var minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   for (var i=0;i<elements.length;i++){
@@ -438,24 +454,21 @@ function getWorldBounds(){
     if(e.type==='rect'){ minX=Math.min(minX,e.x); minY=Math.min(minY,e.y); maxX=Math.max(maxX,e.x+e.w); maxY=Math.max(maxY,e.y+e.h); }
     else { var r=e.r||15; minX=Math.min(minX,e.x-r); minY=Math.min(minY,e.y-r); maxX=Math.max(maxX,e.x+r); maxY=Math.max(maxY,e.y+r); }
   }
-  return {minX:minX,minY:minY,maxX:maxX,maxY:maxY};
+  return {minX:minX,minY:minY,maxX:maxX,maxY=maxY};
 }
 function drawMiniMap(){
-  var dpr=Math.max(1,window.devicePixelRatio||1);
   mctx.setTransform(1,0,0,1,0,0); mctx.clearRect(0,0,mini.width,mini.height);
-  var b=getWorldBounds(), WW=b.maxX-b.minX, WH=b.maxY-b.minY;
-  var pad=6*dpr, vw=mini.width-pad*2, vh=mini.height-pad*2, s=Math.min(vw/WW, vh/WH);
+  var b=getWorldBounds(), WW=b.maxX-b.minX, WH=b.maxY-b.minY, ratio=dpr();
+  var pad=6*ratio, vw=mini.width-pad*2, vh=mini.height-pad*2, s=Math.min(vw/WW, vh/WH);
   var ox=pad - b.minX*s, oy=pad - b.minY*s;
-  mctx.strokeStyle='#333'; mctx.lineWidth=1*dpr;
+  mctx.strokeStyle='#333'; mctx.lineWidth=1*ratio;
   mctx.strokeRect(b.minX*s+ox, b.minY*s+oy, WW*s, WH*s);
-  for (var i=0;i<elements.length;i++){
-    var e=elements[i]; mctx.strokeStyle='#666';
-    if(e.type==='rect'){ mctx.strokeRect(e.x*s+ox, e.y*s+oy, e.w*s, e.h*s); }
-    else { var r=(e.r||15)*s; mctx.beginPath(); mctx.arc(e.x*s+ox, e.y*s+oy, r, 0, Math.PI*2); mctx.stroke(); }
-  }
+  for (var i=0;i<elements.length;i++){ var e=elements[i]; mctx.strokeStyle='#666';
+    if(e.type==='rect'){ mctx.strokeRect(e.x*s+ox,e.y*s+oy,e.w*s,e.h*s); }
+    else { var r=(e.r||15)*s; mctx.beginPath(); mctx.arc(e.x*s+ox,e.y*s+oy,r,0,Math.PI*2); mctx.stroke(); } }
   var rect=canvas.getBoundingClientRect(), cssW=rect.width, cssH=rect.height;
   var tlx=(-panX)/viewScale, tly=(-panY)/viewScale, brx=(cssW-panX)/viewScale, bry=(cssH-panY)/viewScale;
-  mctx.strokeStyle='#0a84ff'; mctx.lineWidth=2*dpr;
+  mctx.strokeStyle='#0a84ff'; mctx.lineWidth=2*ratio;
   mctx.strokeRect(tlx*s+ox, tly*s+oy, (brx-tlx)*s, (bry-tly)*s);
 }
 function fitToExtents(){
@@ -467,28 +480,50 @@ function fitToExtents(){
   viewScale=s; panX=rect.width/2 - cx*viewScale; panY=rect.height/2 - cy*viewScale; draw();
 }
 
-/* ---------- Reset & resizing ---------- */
-function resetToResearch(){
-  panX=panY=0; viewScale=1;
-  createElements(); draw();
+/* Add shapes */
+function placeNewAt(p){
+  var w=screenToWorld(p.x,p.y);
+  if(addMode==='rect'){
+    var label = prompt('Label for rectangle:', 'STRUCTURE') || 'STRUCTURE';
+    elements.push({id:'rect'+Math.random().toString(36).slice(2,7), type:'rect', x:w.x-50,y:w.y-35,w:100,h:70,color:'#d9d9d9',label:label,draggable:true,resizable:true});
+  } else if(addMode==='circle'){
+    var label = prompt('Label for circle:', 'FEATURE') || 'FEATURE';
+    elements.push({id:'circle'+Math.random().toString(36).slice(2,7), type:'circle', x:w.x,y:w.y,r:30,color:'#ddd',label:label,draggable:true,resizable:true});
+  }
+  addMode=null; selected=null; updateMeasurements(); draw();
 }
 
-/* ---------- Resize observer ---------- */
+/* Resize, observe, init */
 function resizeCanvas(){
-  var rect=wrapper.getBoundingClientRect(), dpr=Math.max(1,window.devicePixelRatio||1);
-  canvas.width=Math.max(1,Math.floor(rect.width*dpr));
-  canvas.height=Math.max(1,Math.floor(rect.height*dpr));
+  var rect=wrapper.getBoundingClientRect(), ratio=dpr();
+  canvas.width=Math.max(1,Math.floor(rect.width*ratio));
+  canvas.height=Math.max(1,Math.floor(rect.height*ratio));
   var mr=mini.getBoundingClientRect();
-  mini.width=Math.max(1,Math.floor(mr.width*dpr));
-  mini.height=Math.max(1,Math.floor(mr.height*dpr));
+  mini.width=Math.max(1,Math.floor(mr.width*ratio));
+  mini.height=Math.max(1,Math.floor(mr.height*ratio));
   CENTER_X=rect.width/2; CENTER_Y=rect.height/2;
   draw();
 }
 if(window.ResizeObserver){ new ResizeObserver(resizeCanvas).observe(wrapper); }
 else { window.addEventListener('resize',resizeCanvas); window.addEventListener('orientationchange',resizeCanvas); }
 
-/* ---------- Init ---------- */
-createElements();
+/* Buttons */
+applyBtn.onclick=function(){ rebuildCassava(parseInt(cassCountInput.value,10)||0); draw(); };
+resetBtn.onclick=function(){ panX=panY=0; viewScale=1; createDefaults(); draw(); };
+centerBtn.onclick=function(){ panX=panY=0; viewScale=1; draw(); };
+gridBtn.onclick=function(){ showGrid=!showGrid; draw(); };
+fitBtn.onclick=fitToExtents;
+addRectBtn.onclick=function(){ addMode='rect'; };
+addCircleBtn.onclick=function(){ addMode='circle'; };
+delSelectedBtn.onclick=function(){
+  if(!selected) return;
+  elements = elements.filter(function(e){ return e!==selected; });
+  selected=null; draw();
+};
+clearCassBtn.onclick=function(){ removeCassava(); draw(); };
+
+/* Init */
+createDefaults();
 resizeCanvas();
 draw();
 </script>
