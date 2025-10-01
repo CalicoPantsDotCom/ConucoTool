@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes, viewport-fit=cover" />
-<title>Taíno Conuco Layout • v6.2</title>
+<title>Taíno Conuco Layout • v6.3</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{--gap:10px;--radius:10px}
@@ -31,7 +31,7 @@
 <body>
   <div class="container">
     <h1>Taíno Conuco Layout Tool</h1>
-    <div class="badge">build v6.2 • crisp text • resizable shapes • pinch+zoom • inertia • Fit • full-viewport grid • add shapes • cassava ring lock</div>
+    <div class="badge">build v6.3 • crisp text • resizable shapes • pinch+zoom • inertia • Fit • full-viewport grid • add/delete shapes • cassava ring lock</div>
 
     <div class="row controls">
       <button id="applyBtn">Apply</button>
@@ -60,15 +60,21 @@
   </div>
 
 <script>
-/* ---------- Utilities & globals ---------- */
+/* ------------ tiny error reporter to yellow bar ------------ */
+window.onerror = function(msg, src, line, col){
+  document.getElementById('measurements').innerHTML =
+    '<span style="color:#b00020"><b>Error:</b> '+ String(msg) +' @ '+(line||'?')+':'+(col||'?')+'</span>';
+};
+
+/* ------------ utilities & globals ------------ */
 if(!Math.hypot){Math.hypot=function(x,y){return Math.sqrt(x*x+y*y)}}
+function DPR(){ return Math.max(1, window.devicePixelRatio || 1); }
 
 var canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d',{alpha:true});
 var wrapper=document.getElementById('canvasWrapper');
 var mini=document.getElementById('miniMap'), mctx=mini.getContext('2d');
-var dpr=function(){return Math.max(1,window.devicePixelRatio||1)}; // helper
 
-var SCALE=10; // px per foot (for distance readouts only)
+var SCALE=10; // px per foot for readouts
 var CENTER_X=350, CENTER_Y=400, showGrid=true;
 
 var panX=0, panY=0, viewScale=1, MIN_SCALE=0.5, MAX_SCALE=4;
@@ -81,22 +87,20 @@ var pinching=false, pinchStartDist=0, pinchStartScale=1, pinchFocalX=0, pinchFoc
 var inertiaVX=0, inertiaVY=0, inertiaId=0, lastMoveTime=0, lastMoveX=0, lastMoveY=0, lastTap=0;
 
 var addMode=null; // 'rect'|'circle'|null
-
-// elements store
 var elements=[];
 
-/* ---------- Defaults (researched) ---------- */
+/* ------------ researched defaults ------------ */
 var defaults = {
   barn:    { x:-260, y:  40, w:180, h:140, label:'BARN',  color:'#d4c5a0' },
   house:   { x: 130, y:  40, w:160, h:160, label:'HOUSE', color:'#e8dcc8' },
   planter: { x:-160, y:-210, w: 90, h: 60, label:'PLANTER', color:'#c07860' },
   septic:  { x:-150, y: 270, r: 40, label:'SEPTIC', color:'#e0e0e0', dash:true },
-  conuco:  { x:  20, y:-160, r: 45, label:'CONUCO', color:'#8b7355' },
+  conuco:  { x:  20, y:-160, r: 45, label:'CONUCO', color:'#8b7355' }, /* 9 ft diameter → r ~ 45 px */
   yopo:    { x:  -5, y:-105, w: 30, h: 30, label:'Y', color:'#4a4a4a' },
   palm:    { x: 130, y: 240, r: 18, label:'PALM', color:'#8b7355', special:true }
 };
 
-/* ---------- DOM hooks ---------- */
+/* ------------ DOM hooks ------------ */
 var applyBtn=document.getElementById('applyBtn');
 var resetBtn=document.getElementById('resetBtn');
 var centerBtn=document.getElementById('centerBtn');
@@ -109,14 +113,14 @@ var addCircleBtn=document.getElementById('addCircleBtn');
 var delSelectedBtn=document.getElementById('delSelectedBtn');
 var clearCassBtn=document.getElementById('clearCassBtn');
 
-/* ---------- Elements management ---------- */
+/* ------------ element builders ------------ */
 function worldX(dx){return CENTER_X+dx}
 function worldY(dy){return CENTER_Y+dy}
 
 function rectEl(id, o){
   return { id:id||('rect'+Math.random().toString(36).slice(2,7)), type:'rect',
     x:worldX(o.x), y:worldY(o.y), w:o.w, h:o.h,
-    color:o.color||'#ddd', label:o.label||'RECT', draggable:true, resizable:true };
+    color:o.color||'#d9d9d9', label:o.label||'RECT', draggable:true, resizable:true };
 }
 function circleEl(id, o){
   return { id:id||('circle'+Math.random().toString(36).slice(2,7)), type:'circle',
@@ -128,6 +132,7 @@ function specialPalm(id, o){
     label:o.label, draggable:true, resizable:false };
 }
 
+/* ------------ default scene & cassava ring ------------ */
 function createDefaults(){
   elements = [
     rectEl('barn',  defaults.barn),
@@ -138,46 +143,43 @@ function createDefaults(){
     rectEl('yopo', defaults.yopo),
     specialPalm('palm', defaults.palm)
   ];
-  // initial cassava from control value
   rebuildCassava(parseInt(cassCountInput.value,10) || 0);
   updateMeasurements();
 }
-
-function get(id){ for(var i=0;i<elements.length;i++){ if(elements[i].id===id) return elements[i]; } }
-
-/* ---------- Cassava helpers ---------- */
+function get(id){ for(var i=0;i<elements.length;i++){ if(elements[i].id===id) return elements[i]; } return null; }
 function removeCassava(){
-  elements = elements.filter(function(e){ return !/^cassava/.test(e.id); });
+  var out=[]; for(var i=0;i<elements.length;i++){ if(!/^cassava/.test(elements[i].id)) out.push(elements[i]); }
+  elements=out;
 }
 function rebuildCassava(n){
   removeCassava();
-  if (n<=0) return;
-  var c = get('conuco'); if (!c) return;
-  var radius = Math.max(8, c.r - 6); // place on rim (slightly in)
-  for (var i=0;i<n;i++){
-    var ang = (i / n) * Math.PI * 2;
-    var dx = Math.cos(ang) * radius;
-    var dy = Math.sin(ang) * radius;
+  if(n<=0) return;
+  var c=get('conuco'); if(!c) return;
+  var radius=Math.max(8, c.r - 6), i;
+  for(i=0;i<n;i++){
+    var ang = (i/n)*Math.PI*2;
+    var dx = Math.cos(ang)*radius, dy=Math.sin(ang)*radius;
     elements.push({ id:'cassava'+(i+1), type:'circle', x:c.x+dx, y:c.y+dy, r:6, color:'#228b22', label:'', draggable:true, resizable:false, cassava:true });
   }
 }
 
-/* ---------- Measurements ---------- */
+/* ------------ measurements ------------ */
 function updateMeasurements(){
   var m=document.getElementById('measurements');
   function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y)/SCALE}
   var barn=get('barn'), house=get('house'), planter=get('planter'), conuco=get('conuco'), septic=get('septic'), palm=get('palm');
   if(!(barn&&house&&planter&&conuco&&septic&&palm)){ m.textContent=''; return; }
+  var cassCount=0; for(var i=0;i<elements.length;i++){ if(elements[i].cassava) cassCount++; }
   m.innerHTML =
     '<div>Barn → Planter: <span class="live">'+dist(barn,planter).toFixed(1)+'</span> ft</div>'+
     '<div>Barn → Septic: <span class="live">'+dist(barn,septic).toFixed(1)+'</span> ft</div>'+
     '<div>Barn → House (gap): <span class="live">'+(Math.abs(house.x-(barn.x+barn.w))/SCALE).toFixed(1)+'</span> ft</div>'+
     '<div>House → Palm: <span class="live">'+dist(house,palm).toFixed(1)+'</span> ft</div>'+
     '<div>Conuco radius: <span class="live">'+(conuco.r/SCALE).toFixed(1)+'</span> ft</div>'+
-    '<div>Cassava count: <span class="live">'+(elements.filter(e=>e.cassava).length)+'</span></div>';
+    '<div>Cassava count: <span class="live">'+cassCount+'</span></div>';
 }
 
-/* ---------- Drawing ---------- */
+/* ------------ drawing ------------ */
 function currentViewWorldBounds(){
   var rect=canvas.getBoundingClientRect(), w=rect.width, h=rect.height;
   var tlx=(-panX)/viewScale, tly=(-panY)/viewScale;
@@ -186,10 +188,9 @@ function currentViewWorldBounds(){
 }
 
 function draw(){
-  var ratio=dpr();
+  var ratio=DPR();
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // world transform
   ctx.setTransform(ratio*viewScale,0,0,ratio*viewScale, ratio*panX, ratio*panY);
 
   drawGridWorld();
@@ -204,7 +205,7 @@ function draw(){
 function drawGridWorld(){
   if(!showGrid) return;
   var vb=currentViewWorldBounds();
-  var step=100; // px in world
+  var step=100; // world px
   var startX=Math.floor((vb.minX- step*4)/step)*step;
   var endX  =Math.ceil ((vb.maxX+ step*4)/step)*step;
   var startY=Math.floor((vb.minY- step*4)/step)*step;
@@ -213,12 +214,10 @@ function drawGridWorld(){
   ctx.strokeStyle='#ddd';
   ctx.lineWidth=1/viewScale;
 
-  for(var x=startX; x<=endX; x+=step){ ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke(); }
-  for(var y=startY; y<=endY; y+=step){ ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke(); }
+  var x; for(x=startX; x<=endX; x+=step){ ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke(); }
+  var y; for(y=startY; y<=endY; y+=step){ ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke(); }
 
-  // axes
-  ctx.strokeStyle='#999';
-  ctx.lineWidth=2/viewScale;
+  ctx.strokeStyle='#999'; ctx.lineWidth=2/viewScale;
   ctx.beginPath(); ctx.moveTo(CENTER_X, startY); ctx.lineTo(CENTER_X, endY); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(startX, CENTER_Y); ctx.lineTo(endX, CENTER_Y); ctx.stroke();
 }
@@ -235,13 +234,13 @@ function drawElement(el){
     ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=2/viewScale;
     ctx.beginPath(); ctx.ellipse(el.x,el.y,12,20,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='#2d5016';
-    for (var i=0;i<5;i++){ ctx.beginPath(); ctx.moveTo(el.x,el.y-15);
+    var i; for(i=0;i<5;i++){ ctx.beginPath(); ctx.moveTo(el.x,el.y-15);
       var a=(i-2)*0.4; ctx.quadraticCurveTo(el.x+Math.sin(a)*15, el.y-30, el.x+Math.sin(a)*20, el.y-40); ctx.stroke(); }
   }
 }
 
-/* Crisp, zoom-proof labels */
-function worldToScreen(wx,wy){ return { x:(wx*viewScale+panX)*dpr(), y:(wy*viewScale+panY)*dpr() }; }
+/* crisp, zoom-proof labels */
+function worldToScreen(wx,wy){ return { x:(wx*viewScale+panX)*DPR(), y:(wy*viewScale+panY)*DPR() }; }
 function drawLabelsCrisp(){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.textAlign='center'; ctx.fillStyle='#000';
@@ -251,12 +250,12 @@ function drawLabelsCrisp(){
     var cy=(el.type==='rect')? el.y+el.h/2 : el.y;
     var p=worldToScreen(cx, cy + 3/viewScale);
     var size=(el.type==='rect'?12:(el.r>30?10:9));
-    ctx.font='bold '+Math.round(size*dpr())+'px Arial';
+    ctx.font='bold '+Math.round(size*DPR())+'px Arial';
     ctx.fillText(el.label, p.x, p.y);
   }
 }
 
-/* Handles */
+/* handles */
 var HANDLE_SIZE=7; // screen px
 function getRectHandles(el){
   return [
@@ -267,13 +266,12 @@ function getRectHandles(el){
 }
 function drawHandles(){
   ctx.setTransform(1,0,0,1,0,0);
-  for (var i=0;i<elements.length;i++){
+  var i; for(i=0;i<elements.length;i++){
     var el=elements[i]; if(!el.resizable) continue;
-    ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
-    if(el===selected){ ctx.fillStyle='#f0fbff'; } // subtle tint on selection
+    ctx.strokeStyle='#111'; ctx.fillStyle=(el===selected)?'#eefaff':'#fff';
     if(el.type==='rect'){
-      var hs=getRectHandles(el);
-      for(var j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
+      var hs=getRectHandles(el), j;
+      for(j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
         ctx.beginPath(); ctx.rect(p.x-HANDLE_SIZE, p.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2); ctx.fill(); ctx.stroke(); }
     } else if(el.type==='circle'){
       var rim=worldToScreen(el.x+el.r, el.y);
@@ -281,14 +279,12 @@ function drawHandles(){
     }
   }
 }
-
-/* Hit-test handles (screen space) */
 function hitTestHandle(sx,sy){
   for (var i=elements.length-1;i>=0;i--){
     var el=elements[i]; if(!el.resizable) continue;
     if(el.type==='rect'){
-      var hs=getRectHandles(el);
-      for(var j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
+      var hs=getRectHandles(el), j;
+      for(j=0;j<hs.length;j++){ var p=worldToScreen(hs[j].x, hs[j].y);
         if(Math.abs(sx-p.x)<=HANDLE_SIZE && Math.abs(sy-p.y)<=HANDLE_SIZE){ return {el:el,kind:'rect',handle:hs[j].k}; }
       }
     } else if(el.type==='circle'){
@@ -299,7 +295,7 @@ function hitTestHandle(sx,sy){
   return null;
 }
 
-/* Picking */
+/* picking */
 function screenToWorld(px,py){ return {x:(px-panX)/viewScale, y:(py-panY)/viewScale}; }
 function getElementAtWorld(x,y){
   for (var i=elements.length-1;i>=0;i--){
@@ -313,18 +309,18 @@ function getElementAtWorld(x,y){
 }
 function getCanvasCoordsClient(cx,cy){ var r=canvas.getBoundingClientRect(); return {x:(cx-r.left), y:(cy-r.top)}; }
 
-/* ---------- Input ---------- */
+/* ------------ input ------------ */
 canvas.addEventListener('mousedown', function(e){
   var p=getCanvasCoordsClient(e.clientX,e.clientY), now=Date.now();
-  // add mode first
   if(addMode){ placeNewAt(p); return; }
 
-  var handle=hitTestHandle(p.x*dpr(), p.y*dpr());
+  var handle=hitTestHandle(p.x*DPR(), p.y*DPR());
   if(handle){ resizing=handle; selected=handle.el; draw(); return; }
 
   var w=screenToWorld(p.x,p.y), el=getElementAtWorld(w.x,w.y);
   if(el){ dragging=el; selected=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; draw(); }
-  else { selected=null; panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y; }
+  else { selected=null; panning=true; panStartX=p.x-panX; panStartY=p.y-panY;
+         inertiaVX=inertiaVY=0; lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y; }
 
   if(now-lastTap<280){ zoomAt(p.x,p.y,1.6); } lastTap=now;
 });
@@ -345,22 +341,17 @@ window.addEventListener('mousemove', function(e){
     panX=p.x-panStartX; panY=p.y-panStartY; draw();
   }
 });
-window.addEventListener('mouseup', function(){
-  if(panning) startInertia();
-  dragging=null; panning=false; resizing=null;
-});
+window.addEventListener('mouseup', function(){ if(panning) startInertia(); dragging=null; panning=false; resizing=null; });
 
 canvas.addEventListener('wheel', function(e){
   e.preventDefault(); var p=getCanvasCoordsClient(e.clientX,e.clientY); zoomAt(p.x,p.y, e.deltaY<0 ? 1.1 : 1/1.1);
 },{passive:false});
 
 canvas.addEventListener('touchstart', function(e){
-  // add mode: place with first tap
   if(addMode){ var t=e.touches[0]; placeNewAt(getCanvasCoordsClient(t.clientX,t.clientY)); e.preventDefault(); return; }
-
   if(e.touches.length===1){
     var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY), now=Date.now();
-    var h=hitTestHandle(p.x*dpr(), p.y*dpr());
+    var h=hitTestHandle(p.x*DPR(), p.y*DPR());
     if(h){ resizing=h; selected=h.el; draw(); e.preventDefault(); return; }
     var w=screenToWorld(p.x,p.y), el=getElementAtWorld(w.x,w.y);
     if(el){ dragging=el; selected=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; draw(); }
@@ -402,7 +393,7 @@ canvas.addEventListener('touchmove', function(e){
 },{passive:false});
 canvas.addEventListener('touchend', function(){ if(panning && !pinching) startInertia(); pinching=false; dragging=null; panning=false; resizing=null; });
 
-/* Resize logic */
+/* resize logic */
 function handleResize(p){
   var w=screenToWorld(p.x,p.y);
   var el=resizing.el;
@@ -418,14 +409,14 @@ function handleResize(p){
     if(h.indexOf('e')!==-1) setR(w.x);
     if(h.indexOf('n')!==-1) setT(w.y);
     if(h.indexOf('s')!==-1) setB(w.y);
-  } else { // circle radius drag (east handle)
+  } else { // circle radius
     el.r = Math.max(6, Math.abs(w.x - el.x));
     if(lockCassInput.checked && el.id==='conuco'){ rebuildCassava(parseInt(cassCountInput.value,10)||0); }
   }
   updateMeasurements(); draw();
 }
 
-/* Zoom helpers + inertia */
+/* zoom helpers + inertia */
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 function setZoomAt(fx,fy,newScale){
   newScale=clamp(newScale,MIN_SCALE,MAX_SCALE);
@@ -446,26 +437,27 @@ function startInertia(){
   if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step);
 }
 
-/* Mini-map + Fit */
+/* mini-map + fit */
 function getWorldBounds(){
-  var minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
-  for (var i=0;i<elements.length;i++){
-    var e=elements[i];
-    if(e.type==='rect'){ minX=Math.min(minX,e.x); minY=Math.min(minY,e.y); maxX=Math.max(maxX,e.x+e.w); maxY=Math.max(maxY,e.y+e.h); }
-    else { var r=e.r||15; minX=Math.min(minX,e.x-r); minY=Math.min(minY,e.y-r); maxX=Math.max(maxX,e.x+r); maxY=Math.max(maxY,e.y+r); }
+  var minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9, i, e, r;
+  for (i=0;i<elements.length;i++){
+    e=elements[i];
+    if(e.type==='rect'){ if(e.x<minX)minX=e.x; if(e.y<minY)minY=e.y; if(e.x+e.w>maxX)maxX=e.x+e.w; if(e.y+e.h>maxY)maxY=e.y+e.h; }
+    else { r=e.r||15; if(e.x-r<minX)minX=e.x-r; if(e.y-r<minY)minY=e.y-r; if(e.x+r>maxX)maxX=e.x+r; if(e.y+r>maxY)maxY=e.y+r; }
   }
-  return {minX:minX,minY:minY,maxX:maxX,maxY=maxY};
+  return {minX:minX,minY:minY,maxX:maxX,maxY:maxY};
 }
 function drawMiniMap(){
   mctx.setTransform(1,0,0,1,0,0); mctx.clearRect(0,0,mini.width,mini.height);
-  var b=getWorldBounds(), WW=b.maxX-b.minX, WH=b.maxY-b.minY, ratio=dpr();
+  var b=getWorldBounds(), WW=b.maxX-b.minX, WH=b.maxY-b.minY, ratio=DPR();
   var pad=6*ratio, vw=mini.width-pad*2, vh=mini.height-pad*2, s=Math.min(vw/WW, vh/WH);
   var ox=pad - b.minX*s, oy=pad - b.minY*s;
   mctx.strokeStyle='#333'; mctx.lineWidth=1*ratio;
   mctx.strokeRect(b.minX*s+ox, b.minY*s+oy, WW*s, WH*s);
-  for (var i=0;i<elements.length;i++){ var e=elements[i]; mctx.strokeStyle='#666';
+  var i,e;
+  for (i=0;i<elements.length;i++){ e=elements[i]; mctx.strokeStyle='#666';
     if(e.type==='rect'){ mctx.strokeRect(e.x*s+ox,e.y*s+oy,e.w*s,e.h*s); }
-    else { var r=(e.r||15)*s; mctx.beginPath(); mctx.arc(e.x*s+ox,e.y*s+oy,r,0,Math.PI*2); mctx.stroke(); } }
+    else { var rr=(e.r||15)*s; mctx.beginPath(); mctx.arc(e.x*s+ox,e.y*s+oy,rr,0,Math.PI*2); mctx.stroke(); } }
   var rect=canvas.getBoundingClientRect(), cssW=rect.width, cssH=rect.height;
   var tlx=(-panX)/viewScale, tly=(-panY)/viewScale, brx=(cssW-panX)/viewScale, bry=(cssH-panY)/viewScale;
   mctx.strokeStyle='#0a84ff'; mctx.lineWidth=2*ratio;
@@ -480,22 +472,24 @@ function fitToExtents(){
   viewScale=s; panX=rect.width/2 - cx*viewScale; panY=rect.height/2 - cy*viewScale; draw();
 }
 
-/* Add shapes */
+/* add / delete shapes */
 function placeNewAt(p){
   var w=screenToWorld(p.x,p.y);
   if(addMode==='rect'){
-    var label = prompt('Label for rectangle:', 'STRUCTURE') || 'STRUCTURE';
-    elements.push({id:'rect'+Math.random().toString(36).slice(2,7), type:'rect', x:w.x-50,y:w.y-35,w:100,h:70,color:'#d9d9d9',label:label,draggable:true,resizable:true});
+    var labelR = prompt('Label for rectangle:', 'STRUCTURE'); if(labelR===null) { addMode=null; return; }
+    if(labelR==='') labelR='STRUCTURE';
+    elements.push({id:'rect'+Math.random().toString(36).slice(2,7), type:'rect', x:w.x-50,y:w.y-35,w:100,h:70,color:'#d9d9d9',label:labelR,draggable:true,resizable:true});
   } else if(addMode==='circle'){
-    var label = prompt('Label for circle:', 'FEATURE') || 'FEATURE';
-    elements.push({id:'circle'+Math.random().toString(36).slice(2,7), type:'circle', x:w.x,y:w.y,r:30,color:'#ddd',label:label,draggable:true,resizable:true});
+    var labelC = prompt('Label for circle:', 'FEATURE'); if(labelC===null) { addMode=null; return; }
+    if(labelC==='') labelC='FEATURE';
+    elements.push({id:'circle'+Math.random().toString(36).slice(2,7), type:'circle', x:w.x,y:w.y,r:30,color:'#ddd',label:labelC,draggable:true,resizable:true});
   }
   addMode=null; selected=null; updateMeasurements(); draw();
 }
 
-/* Resize, observe, init */
+/* canvas sizing */
 function resizeCanvas(){
-  var rect=wrapper.getBoundingClientRect(), ratio=dpr();
+  var rect=wrapper.getBoundingClientRect(), ratio=DPR();
   canvas.width=Math.max(1,Math.floor(rect.width*ratio));
   canvas.height=Math.max(1,Math.floor(rect.height*ratio));
   var mr=mini.getBoundingClientRect();
@@ -507,7 +501,7 @@ function resizeCanvas(){
 if(window.ResizeObserver){ new ResizeObserver(resizeCanvas).observe(wrapper); }
 else { window.addEventListener('resize',resizeCanvas); window.addEventListener('orientationchange',resizeCanvas); }
 
-/* Buttons */
+/* buttons */
 applyBtn.onclick=function(){ rebuildCassava(parseInt(cassCountInput.value,10)||0); draw(); };
 resetBtn.onclick=function(){ panX=panY=0; viewScale=1; createDefaults(); draw(); };
 centerBtn.onclick=function(){ panX=panY=0; viewScale=1; draw(); };
@@ -517,12 +511,13 @@ addRectBtn.onclick=function(){ addMode='rect'; };
 addCircleBtn.onclick=function(){ addMode='circle'; };
 delSelectedBtn.onclick=function(){
   if(!selected) return;
-  elements = elements.filter(function(e){ return e!==selected; });
-  selected=null; draw();
+  var out=[], i;
+  for(i=0;i<elements.length;i++){ if(elements[i]!==selected) out.push(elements[i]); }
+  elements=out; selected=null; draw();
 };
 clearCassBtn.onclick=function(){ removeCassava(); draw(); };
 
-/* Init */
+/* init */
 createDefaults();
 resizeCanvas();
 draw();
