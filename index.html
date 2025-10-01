@@ -3,452 +3,494 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=3, user-scalable=yes, viewport-fit=cover" />
-<title>Taíno Conuco Layout • v6 (research defaults + resizable shapes)</title>
+<title>Taíno Conuco Layout • v6.1</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{--gap:10px;--radius:10px}
   body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:#f5f1e8;color:#222;line-height:1.3;padding:var(--gap)}
-  .container{width:min(100%,960px);margin-inline:auto;background:#fff;border:2px solid #333;padding:var(--gap);border-radius:var(--radius)}
-  h1{font-size:clamp(14px,3.8vw,20px);text-align:center;margin-bottom:6px}
-  .badge{text-align:center;font-size:11px;color:#666;margin-bottom:8px}
-  .controls{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
-  @media (min-width:600px){.controls{grid-template-columns:repeat(5,1fr)}}
+  .container{width:min(100%,920px);margin-inline:auto;background:#fff;border:2px solid #333;padding:var(--gap);border-radius:var(--radius)}
+  h1{font-size:clamp(14px,3.8vw,20px);text-align:center;margin-bottom:4px}
+  .badge{font-size:11px;color:#666;text-align:center;margin-bottom:8px}
+  .hint{font-size:12px;color:#444;margin-bottom:8px;text-align:left}
+  .controls{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px}
+  @media (max-width:640px){.controls{grid-template-columns:repeat(3,1fr)}}
   button{padding:12px;background:#4a4a4a;color:#fff;border:0;border-radius:8px;font-size:clamp(11px,3.2vw,14px);cursor:pointer;touch-action:manipulation}
   button:active{background:#666}
-  .coords{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:10px;font-size:clamp(10px,2.8vw,12px)}
-  .coord-item{background:#f9f9f9;padding:8px;border-left:3px solid #666;border-radius:6px}
-  .coord-item strong{display:block;margin-bottom:4px}
-  .coord-item input{width:64px;padding:6px 5px;font-size:clamp(11px,3vw,13px);margin:0 4px;border:1px solid #ccc;border-radius:6px;-webkit-text-size-adjust:100%}
-  .measurements{background:#fffde7;padding:8px;margin-bottom:10px;font-size:clamp(10px,2.8vw,12px);border-left:3px solid #daa520;border-radius:6px;min-height:20px}
-  .measurements div{margin:2px 0}
+  .measurements{background:#fffde7;padding:8px;margin-bottom:10px;font-size:12px;border-left:3px solid #daa520;border-radius:6px;min-height:20px}
   .live{color:#06c;font-weight:700}
-  #canvasWrapper{width:100%;height:min(62dvh,560px);min-height:280px;border:2px solid #333;background:#fff;overflow:hidden;position:relative;border-radius:var(--radius)}
-  canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
-  /* selection + handles */
-  .legend{font-size:12px;margin-bottom:6px;color:#444}
+  #canvasWrapper{width:100%;height:min(62dvh,560px);min-height:260px;border:2px solid #333;background:#fff;overflow:hidden;position:relative;border-radius:var(--radius)}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #miniMap{position:absolute;right:8px;bottom:8px;width:140px;height:100px;border:1px solid #333;background:#ffffffcc;border-radius:6px;touch-action:none}
 </style>
 </head>
 <body>
   <div class="container">
     <h1>Taíno Conuco Layout Tool</h1>
-    <div class="badge">build v6 • research defaults (9 ft mound, 2 cassava) • crisp text • resizable shapes</div>
-
+    <div class="badge">build v6.1 • research defaults (9 ft mound, 2 cassava) • crisp text • resizable shapes • pinch+zoom • inertia • fit • minimap</div>
     <div class="controls">
       <button id="applyBtn">Apply</button>
-      <button id="resetDefaultBtn">Reset</button>
-      <button id="resetZeroBtn">Center</button>
-      <button id="toggleGridBtn">Grid</button>
+      <button id="resetBtn">Reset</button>
+      <button id="centerBtn">Center</button>
+      <button id="gridBtn">Grid</button>
       <button id="fitBtn">Fit</button>
     </div>
-
-    <div class="legend">Drag shapes to move. Drag handles to resize (rect: 8 handles, circle: radius handle).</div>
-
-    <div class="coords" id="coordInputs"></div>
+    <div class="hint">Drag shapes to move. Drag handles to resize (rect: 8 handles, circle: radius handle). Double-tap to zoom.</div>
     <div class="measurements" id="measurements">Loading…</div>
-
     <div id="canvasWrapper">
       <canvas id="canvas"></canvas>
-      <!-- mini-map kept for orientation -->
-      <canvas id="miniMap" style="position:absolute;right:8px;bottom:8px;width:140px;height:100px;border:1px solid #333;background:#ffffffcc;border-radius:6px"></canvas>
+      <canvas id="miniMap"></canvas>
     </div>
   </div>
 
 <script>
-/* ========= Constants & State ========= */
-if(!Math.hypot){Math.hypot=(x,y)=>Math.sqrt(x*x+y*y);}
-const SCALE = 10;                    // px per foot for measurements
-const MONTON_DIAM_FT = 9;            // research default (≈ 9 ft diameter mound)   [oai_citation:1‡Conuco Research 9.30.25.pdf](file-service://file-2HQY6NDLs7WBAMiRsru62u)
-const MONTON_RADIUS_PX = (MONTON_DIAM_FT * SCALE)/2; // 45 px at SCALE=10
+/* ---------- Basics ---------- */
+if(!Math.hypot){Math.hypot=function(x,y){return Math.sqrt(x*x+y*y)}}
+var canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d',{alpha:true});
+var wrapper=document.getElementById('canvasWrapper');
+var mini=document.getElementById('miniMap'), mctx=mini.getContext('2d');
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d',{alpha:true});
-const mini = document.getElementById('miniMap');
-const mctx = mini.getContext('2d');
-const wrapper = document.getElementById('canvasWrapper');
+var SCALE=10; // px per foot for measurements
+var CENTER_X=350, CENTER_Y=400, showGrid=true;
 
-let CENTER_X = 350, CENTER_Y = 400;
-let showGrid = true;
-let viewScale = 1, panX = 0, panY = 0;
-const MIN_SCALE = 0.5, MAX_SCALE = 4;
+var panX=0, panY=0, viewScale=1, MIN_SCALE=0.5, MAX_SCALE=4;
+var dragging=null, dragOffX=0, dragOffY=0;
+var resizing=null; // {el, kind:'rect'|'circle', handle:'n'|'s'|'e'|'w'|'ne'...'cRadius'}
+var panning=false, panStartX=0, panStartY=0;
+var pinching=false, pinchStartDist=0, pinchStartScale=1, pinchFocalX=0, pinchFocalY=0;
+var inertiaVX=0, inertiaVY=0, inertiaId=0, lastMoveTime=0, lastMoveX=0, lastMoveY=0, lastTap=0;
 
-let elements = [];
-let dragging = null, dragOffX = 0, dragOffY = 0;
-let activeHandle = null; // {type:'rect'|'circle', corner:'nw'...'se'|'radius', el:ref, start:{...}}
-let panning = false, panStartX = 0, panStartY = 0;
-let pinching = false, pinchStartDist = 0, pinchStartScale = 1, pinchFocalX = 0, pinchFocalY = 0;
-let inertiaVX=0, inertiaVY=0, inertiaId=0, lastMoveTime=0, lastMoveX=0, lastMoveY=0, lastTap=0;
+var elements=[];
 
-/* ========= Defaults (research-aligned) ========= */
-const defaultCoords = {
-  barn:    {x: -270, y:  60, w: 18*12/12*10, h: 160}, // keep existing visual scale, user can resize
-  house:   {x:  100, y:  60, w: 160, h: 160},
-  planter: {x: -170, y:-240, w:  80, h:  50},
-  conuco:  {x:   10, y:-170, r: MONTON_RADIUS_PX},     // 9 ft diameter mound
-  septic:  {x: -150, y: 280, r: 35},
-  palm:    {x:  130, y: 250, r: 15}
+/* ---------- Research defaults ---------- */
+/* 9 ft diameter conuco -> radius = 4.5 ft -> 45 px */
+var defaults = {
+  barn:    { x:-260, y:  40, w:180, h:140, label:'BARN'  },
+  house:   { x: 130, y:  40, w:160, h:160, label:'HOUSE' },
+  planter: { x:-160, y:-210, w: 90, h: 60, label:'PLANTER' },
+  septic:  { x:-150, y: 270, r: 40, label:'SEPTIC' }, // 4 ft-ish radius
+  conuco:  { x:  20, y:-160, r: 45, label:'CONUCO' },
+  yopo:    { x:  -5, y:-105, w: 30, h: 30, label:'Y'     },
+  palm:    { x: 130, y: 240, r: 18, label:'PALM', special:true }
 };
-// Above: the conuco mound is ~9 ft diameter with **2 cassava** plants per mound.   [oai_citation:2‡Conuco Research 9.30.25.pdf](file-service://file-2HQY6NDLs7WBAMiRsru62u)
 
-/* ========= UI wiring ========= */
-document.getElementById('applyBtn').onclick = ()=>{createElementsFromInputs(); draw();};
-document.getElementById('resetDefaultBtn').onclick = ()=>{resetToDefault();};
-document.getElementById('resetZeroBtn').onclick = ()=>{resetViewAndCoords();};
-document.getElementById('toggleGridBtn').onclick = ()=>{showGrid=!showGrid; draw();};
-document.getElementById('fitBtn').onclick = ()=>{fitToExtents();};
+/* ---------- UI wiring ---------- */
+document.getElementById('applyBtn').onclick = function(){ createElements(); draw(); };
+document.getElementById('resetBtn').onclick = resetToResearch;
+document.getElementById('centerBtn').onclick = function(){ panX=panY=0; viewScale=1; draw(); };
+document.getElementById('gridBtn').onclick = function(){ showGrid=!showGrid; draw(); };
+document.getElementById('fitBtn').onclick = fitToExtents;
 
-/* ========= Inputs ========= */
-function createCoordInputs(){
-  const fields = [
-    ['barn','Rect'],['house','Rect'],['planter','Rect'],
-    ['conuco','Mound'],['septic','Circle'],['palm','Palm']
-  ];
-  const html = fields.map(([id,label])=>{
-    const d = defaultCoords[id];
-    const extra = (id==='conuco'||id==='septic'||id==='palm')
-      ? `R:<input type="number" id="${id}R" value="${Math.round(d.r || 30)}">`
-      : `W:<input type="number" id="${id}W" value="${d.w||100}"> H:<input type="number" id="${id}H" value="${d.h||100}">`;
-    return `<div class="coord-item">
-      <strong>${label}</strong>
-      X:<input type="number" id="${id}X" value="${d.x}">
-      Y:<input type="number" id="${id}Y" value="${d.y}">
-      ${extra}
-    </div>`;
-  }).join('');
-  document.getElementById('coordInputs').innerHTML = html;
-}
-function resetToDefault(){
-  createCoordInputs();
-  createElementsFromInputs();
-  draw();
-}
-function resetViewAndCoords(){
-  panX=panY=0; viewScale=1;
-  Object.keys(defaultCoords).forEach(id=>{
-    const d=defaultCoords[id];
-    document.getElementById(id+'X').value=d.x;
-    document.getElementById(id+'Y').value=d.y;
-    if (document.getElementById(id+'W')) document.getElementById(id+'W').value=d.w||100;
-    if (document.getElementById(id+'H')) document.getElementById(id+'H').value=d.h||100;
-    if (document.getElementById(id+'R')) document.getElementById(id+'R').value=Math.round(d.r||30);
-  });
-  createElementsFromInputs();
-  draw();
-}
-
-/* ========= Elements from inputs ========= */
-function createElementsFromInputs(){
-  const getV = (id,s) => parseInt(document.getElementById(id+s).value,10)||0;
+/* ---------- Element creation ---------- */
+function createElements(){
   elements = [
-    { id:'barn', type:'rect', x: getV('barn','X')+CENTER_X, y:getV('barn','Y')+CENTER_Y,
-      width: Math.max(40, getV('barn','W')), height: Math.max(40, getV('barn','H')),
-      color:'#d4c5a0', label:'BARN', draggable:true, resizable:true },
-    { id:'house', type:'rect', x: getV('house','X')+CENTER_X, y:getV('house','Y')+CENTER_Y,
-      width: Math.max(40, getV('house','W')), height: Math.max(40, getV('house','H')),
-      color:'#e8dcc8', label:'House', draggable:true, resizable:true },
-    { id:'planter', type:'rect', x: getV('planter','X')+CENTER_X, y:getV('planter','Y')+CENTER_Y,
-      width: Math.max(30, getV('planter','W')), height: Math.max(24, getV('planter','H')),
-      color:'#c07860', label:'Planter', draggable:true, resizable:true },
-    { id:'conuco', type:'circle', x: getV('conuco','X')+CENTER_X, y:getV('conuco','Y')+CENTER_Y,
-      radius: Math.max(24, getV('conuco','R')), color:'#8b7355', label:'CONUCO', draggable:true, resizable:true },
-    { id:'septic', type:'circle', x: getV('septic','X')+CENTER_X, y:getV('septic','Y')+CENTER_Y,
-      radius: Math.max(16, getV('septic','R')), color:'#e0e0e0', label:'SEPTIC', draggable:true, resizable:true, dash:true },
-    { id:'palm', type:'special', x: getV('palm','X')+CENTER_X, y:getV('palm','Y')+CENTER_Y,
-      radius: Math.max(10, getV('palm','R')), color:'#8b7355', label:'Palm', draggable:true, resizable:false }
+    rectEl('barn',  defaults.barn),
+    rectEl('house', defaults.house),
+    rectEl('planter', defaults.planter),
+    circleEl('septic', defaults.septic, true),
+    circleEl('conuco', defaults.conuco, false),
+    rectEl('yopo', defaults.yopo),
+    specialPalm('palm', defaults.palm)
   ];
 
-  // Place **two** cassava plants on mound slopes (research)    [oai_citation:3‡Conuco Research 9.30.25.pdf](file-service://file-2HQY6NDLs7WBAMiRsru62u)
-  const c = elements.find(e=>e.id==='conuco');
-  const ring = c.radius - 12;
-  const angleA = -Math.PI/6, angleB = Math.PI*5/6; // opposite-ish sides
-  const cass = [
-    {x:c.x + ring*Math.cos(angleA), y:c.y + ring*Math.sin(angleA)},
-    {x:c.x + ring*Math.cos(angleB), y:c.y + ring*Math.sin(angleB)}
-  ];
-  cass.forEach((p,i)=>elements.push({
-    id:'cassava'+(i+1), type:'circle', x:p.x, y:p.y, radius:6, color:'#228b22', label:'', draggable:true, resizable:false
-  }));
+  // Place TWO cassava nodes on conuco rim @ 0° and 180°
+  var c = elements.filter(function(e){return e.id==='conuco'})[0];
+  var ring = c.r - 6;
+  var offs = [[ ring,0],[-ring,0]];
+  for (var i=0;i<offs.length;i++){
+    elements.push({ id:'cassava'+(i+1), type:'circle', x:c.x+offs[i][0]+CENTER_X, y:c.y+offs[i][1]+CENTER_Y,
+      r:6, color:'#228b22', label:'', draggable:true, resizable:false });
+  }
 
   updateMeasurements();
 }
 
-/* ========= Measurements ========= */
+function worldX(dx){return CENTER_X+dx}
+function worldY(dy){return CENTER_Y+dy}
+
+function rectEl(id, o){
+  return { id:id, type:'rect', x:worldX(o.x), y:worldY(o.y), w:o.w, h:o.h,
+    color:(id==='house'?'#e8dcc8':id==='barn'?'#d4c5a0':id==='planter'?'#c07860':'#4a4a4a'),
+    label:o.label, draggable:true, resizable:true };
+}
+function circleEl(id, o, dashed){
+  return { id:id, type:'circle', x:worldX(o.x), y:worldY(o.y), r:o.r,
+    color:(id==='conuco'?'#8b7355':'#e0e0e0'), label:o.label, draggable:true, resizable:true, dash:!!dashed };
+}
+function specialPalm(id, o){
+  return { id:id, type:'special', x:worldX(o.x), y:worldY(o.y), r:o.r, color:'#8b7355',
+    label:o.label, draggable:true, resizable:false };
+}
+
+/* ---------- Measurements ---------- */
 function updateMeasurements(){
-  const get = id => elements.find(e=>e.id===id);
-  const dist = (e1,e2)=>Math.hypot(e1.x-e2.x,e1.y-e2.y)/SCALE;
-  const barn=get('barn'), house=get('house'), planter=get('planter'), conuco=get('conuco'), septic=get('septic'), palm=get('palm');
-  document.getElementById('measurements').innerHTML = `
-    <div>Barn → Planter: <span class="live">${dist(barn,planter).toFixed(1)}</span> ft</div>
-    <div>Barn → Septic: <span class="live">${dist(barn,septic).toFixed(1)}</span> ft</div>
-    <div>Barn → House: <span class="live">${(Math.abs(house.x-(barn.x+barn.width))/SCALE).toFixed(1)}</span> ft</div>
-    <div>House → Palm: <span class="live">${dist(house,palm).toFixed(1)}</span> ft</div>
-    <div>Palm → Septic: <span class="live">${dist(palm,septic).toFixed(1)}</span> ft</div>
-    <div>Conuco → Septic (edge): <span class="live">${((dist(conuco,septic)*SCALE - conuco.radius - septic.radius)/SCALE).toFixed(1)}</span> ft</div>
-    <div>Conuco diameter: <span class="live">${(conuco.radius*2/SCALE).toFixed(1)}</span> ft (target ≈ ${MONTON_DIAM_FT})</div>
-  `;
+  var m=document.getElementById('measurements');
+  function get(id){for(var i=0;i<elements.length;i++) if(elements[i].id===id) return elements[i]}
+  function dist(a,b){return Math.hypot(a.x-b.x, a.y-b.y)/SCALE}
+  var barn=get('barn'), house=get('house'), planter=get('planter'),
+      conuco=get('conuco'), septic=get('septic'), palm=get('palm');
+
+  m.innerHTML =
+    '<div>Barn → Planter: <span class="live">'+dist(barn,planter).toFixed(1)+'</span> ft</div>'+
+    '<div>Barn → Septic: <span class="live">'+dist(barn,septic).toFixed(1)+'</span> ft</div>'+
+    '<div>Barn → House (gap): <span class="live">'+(Math.abs(house.x-(barn.x+barn.w))/SCALE).toFixed(1)+'</span> ft</div>'+
+    '<div>House → Palm: <span class="live">'+dist(house,palm).toFixed(1)+'</span> ft</div>'+
+    '<div>Conuco radius: <span class="live">'+(conuco.r/SCALE).toFixed(1)+'</span> ft</div>';
 }
 
-/* ========= Drawing (crisp text via correct transforms) ========= */
-function resizeCanvas(){
-  const rect = wrapper.getBoundingClientRect();
-  const dpr = Math.max(1, window.devicePixelRatio||1);
-  canvas.width = Math.floor(rect.width * dpr);
-  canvas.height= Math.floor(rect.height* dpr);
-  CENTER_X = rect.width/2; CENTER_Y = rect.height/2;
-
-  const mr = mini.getBoundingClientRect();
-  mini.width = Math.floor(mr.width * dpr);
-  mini.height= Math.floor(mr.height* dpr);
-
-  draw();
-}
-function setupResizeWatcher(){
-  if (window.ResizeObserver){ new ResizeObserver(resizeCanvas).observe(wrapper); }
-  else { addEventListener('resize',resizeCanvas); addEventListener('orientationchange',resizeCanvas); }
-}
-
+/* ---------- Drawing ---------- */
 function draw(){
-  const dpr=Math.max(1,window.devicePixelRatio||1);
-
-  // Clear at pixel resolution
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  // Clear
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  // Apply DPR then view
+  // Apply world transform
   ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,dpr*panX,dpr*panY);
-  const w=canvas.width/dpr, h=canvas.height/dpr;
 
-  // Titles (font size scaled to viewScale for crispness)
-  ctx.fillStyle='#333'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-  ctx.font = `bold ${11/viewScale}px Arial`;
-  ctx.fillText('NORTH',CENTER_X,20);
-  ctx.fillText('SOUTH',CENTER_X,h-20);
+  var w=canvas.width/dpr, h=canvas.height/dpr;
 
   if (showGrid){
     ctx.strokeStyle='#ddd'; ctx.lineWidth=1/viewScale;
-    for(let x=0;x<=w;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
-    for(let y=0;y<=h;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+    for (var x=0;x<=w;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}
+    for (var y=0;y<=h;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
     ctx.strokeStyle='#999'; ctx.lineWidth=2/viewScale;
-    ctx.beginPath(); ctx.moveTo(CENTER_X,0); ctx.lineTo(CENTER_X,h); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,CENTER_Y); ctx.lineTo(w,CENTER_Y); ctx.stroke();
+    ctx.beginPath();ctx.moveTo(CENTER_X,0);ctx.lineTo(CENTER_X,h);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(0,CENTER_Y);ctx.lineTo(w,CENTER_Y);ctx.stroke();
   }
 
-  // Draw elements
-  elements.forEach(el=>drawElement(el));
+  // Shapes
+  for(var i=0;i<elements.length;i++) drawElement(elements[i]);
 
-  // Draw selection handles if any
-  if (dragging && dragging.resizable){ drawHandles(dragging); }
-  else if (activeHandle && activeHandle.el){ drawHandles(activeHandle.el); }
+  // Crisp labels in screen space
+  drawLabelsCrisp();
+
+  // Resize handles on selected/resizable shapes
+  drawHandles();
 
   drawMiniMap();
 }
+
 function drawElement(el){
-  if (el.type==='rect'){
+  if(el.type==='rect'){
     ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=2/viewScale;
-    ctx.fillRect(el.x,el.y,el.width,el.height); ctx.strokeRect(el.x,el.y,el.width,el.height);
-    if (el.label){ ctx.fillStyle='#000'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.font = `bold ${11/viewScale}px Arial`;
-      ctx.fillText(el.label, el.x+el.width/2, el.y+el.height/2);
-    }
-  } else if (el.type==='circle'){
-    ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=(el.radius>10?2:1)/viewScale;
-    if (el.dash) ctx.setLineDash([5/viewScale,5/viewScale]);
-    ctx.beginPath(); ctx.arc(el.x,el.y,el.radius,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
-    if (el.label){ ctx.fillStyle='#000'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.font = `${(el.radius>30?9:8)/viewScale}px Arial`;
-      ctx.fillText(el.label, el.x, el.y);
-    }
-  } else if (el.type==='special'){ // palm glyph
+    ctx.fillRect(el.x,el.y,el.w,el.h); ctx.strokeRect(el.x,el.y,el.w,el.h);
+  } else if(el.type==='circle'){
+    ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=(el.r>10?2:1)/viewScale;
+    if(el.dash) ctx.setLineDash([5/viewScale,5/viewScale]);
+    ctx.beginPath(); ctx.arc(el.x,el.y,el.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+  } else { // special palm (trunk + fronds)
     ctx.fillStyle=el.color; ctx.strokeStyle='#333'; ctx.lineWidth=2/viewScale;
     ctx.beginPath(); ctx.ellipse(el.x,el.y,12,20,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
     ctx.strokeStyle='#2d5016';
-    for(let i=0;i<5;i++){
-      ctx.beginPath(); ctx.moveTo(el.x,el.y-15);
-      const ang=(i-2)*0.4;
-      ctx.quadraticCurveTo(el.x+Math.sin(ang)*15, el.y-30, el.x+Math.sin(ang)*20, el.y-40);
-      ctx.stroke();
-    }
+    for (var i=0;i<5;i++){ ctx.beginPath(); ctx.moveTo(el.x,el.y-15);
+      var a=(i-2)*0.4; ctx.quadraticCurveTo(el.x+Math.sin(a)*15, el.y-30, el.x+Math.sin(a)*20, el.y-40); ctx.stroke(); }
   }
 }
 
-/* ========= Selection & Handles ========= */
-function getHandleHit(el, x, y){
-  const S = 7; // handle size in CSS px (screen space)
-  // convert screen->world for stable math already done by caller
-  if (el.type==='rect'){
-    const pts = [
-      ['nw', el.x, el.y], ['n', el.x+el.width/2, el.y], ['ne', el.x+el.width, el.y],
-      ['w', el.x, el.y+el.height/2], ['e', el.x+el.width, el.y+el.height/2],
-      ['sw', el.x, el.y+el.height], ['s', el.x+el.width/2, el.y+el.height], ['se', el.x+el.width, el.y+el.height]
-    ];
-    for (const [name,hx,hy] of pts){
-      const dx = Math.abs(x - hx), dy = Math.abs(y - hy);
-      if (dx <= S/viewScale && dy <= S/viewScale) return {type:'rect', corner:name};
-    }
-  } else if (el.type==='circle'){
-    // radius handle at eastmost point
-    const hx = el.x + el.radius, hy = el.y;
-    if (Math.abs(x - hx) <= 7/viewScale && Math.abs(y - hy) <= 7/viewScale)
-      return {type:'circle', corner:'radius'};
-  }
-  return null;
+/* ---------- Crisp text (screen-space) ---------- */
+function worldToScreen(wx,wy){
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  return { x:(wx*viewScale+panX)*dpr, y:(wy*viewScale+panY)*dpr };
 }
-function drawHandles(el){
-  ctx.save();
-  ctx.setLineDash([]);
-  ctx.lineWidth = 1.5/viewScale;
-  ctx.strokeStyle = '#0a84ff';
-  ctx.fillStyle = '#fff';
-  if (el.type==='rect'){
-    ctx.strokeRect(el.x, el.y, el.width, el.height);
-    const pts = [
-      [el.x,el.y],[el.x+el.width/2,el.y],[el.x+el.width,el.y],
-      [el.x,el.y+el.height/2],[el.x+el.width,el.y+el.height/2],
-      [el.x,el.y+el.height],[el.x+el.width/2,el.y+el.height],[el.x+el.width,el.y+el.height]
-    ];
-    pts.forEach(([px,py])=>{
-      ctx.beginPath(); ctx.rect(px-4/viewScale, py-4/viewScale, 8/viewScale, 8/viewScale);
+function drawLabelsCrisp(){
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  ctx.setTransform(1,0,0,1,0,0); // screen space
+  ctx.textAlign='center';
+  for (var i=0;i<elements.length;i++){
+    var el=elements[i]; if(!el.label) continue;
+    var centerX = (el.type==='rect') ? el.x + el.w/2 : el.x;
+    var centerY = (el.type==='rect') ? el.y + el.h/2 : el.y;
+    var p = worldToScreen(centerX, centerY + 3/viewScale);
+    var size = (el.type==='rect' ? 12 : (el.r>30?10:9));
+    ctx.fillStyle='#000';
+    ctx.font = 'bold ' + Math.round(size*dpr) + 'px Arial';
+    ctx.fillText(el.label, p.x, p.y);
+  }
+}
+
+/* ---------- Resize handles ---------- */
+var HANDLE_SIZE = 7; // screen px
+function getRectHandles(el){
+  var pts = [
+    {key:'nw', x:el.x,        y:el.y       },
+    {key:'n',  x:el.x+el.w/2, y:el.y       },
+    {key:'ne', x:el.x+el.w,   y:el.y       },
+    {key:'e',  x:el.x+el.w,   y:el.y+el.h/2},
+    {key:'se', x:el.x+el.w,   y:el.y+el.h  },
+    {key:'s',  x:el.x+el.w/2, y:el.y+el.h  },
+    {key:'sw', x:el.x,        y:el.y+el.h  },
+    {key:'w',  x:el.x,        y:el.y+el.h/2}
+  ];
+  return pts;
+}
+function drawHandles(){
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  ctx.setTransform(1,0,0,1,0,0); // screen space
+  ctx.lineWidth=1;
+  for (var i=0;i<elements.length;i++){
+    var el=elements[i]; if(!el.resizable) continue;
+
+    if(el.type==='rect'){
+      var hs = getRectHandles(el);
+      for (var j=0;j<hs.length;j++){
+        var p = worldToScreen(hs[j].x, hs[j].y);
+        ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
+        ctx.beginPath(); ctx.rect(p.x-HANDLE_SIZE, p.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2);
+        ctx.fill(); ctx.stroke();
+      }
+    } else if(el.type==='circle'){
+      var rim = worldToScreen(el.x+el.r, el.y);
+      ctx.strokeStyle='#111'; ctx.fillStyle='#fff';
+      ctx.beginPath(); ctx.rect(rim.x-HANDLE_SIZE, rim.y-HANDLE_SIZE, HANDLE_SIZE*2, HANDLE_SIZE*2);
       ctx.fill(); ctx.stroke();
-    });
-  } else if (el.type==='circle'){
-    ctx.beginPath(); ctx.arc(el.x,el.y,el.radius,0,Math.PI*2); ctx.stroke();
-    // radius handle
-    const hx = el.x + el.radius, hy = el.y;
-    ctx.beginPath(); ctx.rect(hx-4/viewScale, hy-4/viewScale, 8/viewScale, 8/viewScale);
-    ctx.fill(); ctx.stroke();
+    }
   }
-  ctx.restore();
 }
 
-/* ========= Hit testing ========= */
-function screenToWorld(px,py){ return {x:(px - panX)/viewScale, y:(py - panY)/viewScale}; }
-function elementAt(x,y){
-  for (let i=elements.length-1;i>=0;i--){
-    const e=elements[i]; if(!e.draggable) continue;
-    if (e.type==='rect' && x>=e.x && x<=e.x+e.width && y>=e.y && y<=e.y+e.height) return e;
-    if ((e.type==='circle'||e.type==='special') && Math.hypot(x-e.x,y-e.y)<= (e.radius||15)) return e;
+/* Hit-testing handles (screen space rectangles) */
+function hitTestHandle(screenX,screenY){
+  for (var i=elements.length-1;i>=0;i--){
+    var el=elements[i]; if(!el.resizable) continue;
+
+    if(el.type==='rect'){
+      var hs=getRectHandles(el);
+      for (var j=0;j<hs.length;j++){
+        var p=worldToScreen(hs[j].x, hs[j].y);
+        if (Math.abs(screenX-p.x)<=HANDLE_SIZE && Math.abs(screenY-p.y)<=HANDLE_SIZE){
+          return {el:el, kind:'rect', handle:hs[j].key};
+        }
+      }
+    } else if(el.type==='circle'){
+      var rim=worldToScreen(el.x+el.r, el.y);
+      if (Math.abs(screenX-rim.x)<=HANDLE_SIZE && Math.abs(screenY-rim.y)<=HANDLE_SIZE){
+        return {el:el, kind:'circle', handle:'cRadius'};
+      }
+    }
   }
   return null;
 }
 
-/* ========= Input ========= */
-canvas.addEventListener('wheel', e=>{
-  e.preventDefault();
-  const rect=canvas.getBoundingClientRect();
-  const p={x:e.clientX-rect.left,y:e.clientY-rect.top};
-  zoomAt(p.x,p.y, e.deltaY<0?1.1:1/1.1);
-},{passive:false});
-
-canvas.addEventListener('mousedown', e=>{
-  const rect=canvas.getBoundingClientRect(), p={x:e.clientX-rect.left,y:e.clientY-rect.top};
-  const w=screenToWorld(p.x,p.y);
-  const el = elementAt(w.x,w.y);
-  if (el && el.resizable){
-    const h = getHandleHit(el, w.x, w.y);
-    if (h){ activeHandle = {el, ...h, start:{x:w.x,y:w.y, ex:el.x, ey:el.y, ew:el.width, eh:el.height, er:el.radius}}; return; }
-  }
-  if (el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
-  else { panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=Date.now(); lastMoveX=p.x; lastMoveY=p.y; }
-  const now=Date.now(); if (now-lastTap<300) zoomAt(p.x,p.y,1.6); lastTap=now;
-});
-window.addEventListener('mousemove', e=>{
-  const rect=canvas.getBoundingClientRect(), p={x:e.clientX-rect.left,y:e.clientY-rect.top};
-  const w=screenToWorld(p.x,p.y);
-  if (activeHandle){
-    const H=activeHandle;
-    if (H.type==='rect'){
-      let nx=H.el.x, ny=H.el.y, nw=H.el.width, nh=H.el.height;
-      const min=24;
-      const dx=w.x-H.start.x, dy=w.y-H.start.y;
-      if (H.corner.includes('n')){ ny = H.start.ey + dy; nh = H.start.eh - dy; }
-      if (H.corner.includes('s')){ nh = H.start.eh + dy; }
-      if (H.corner.includes('w')){ nx = H.start.ex + dx; nw = H.start.ew - dx; }
-      if (H.corner.includes('e')){ nw = H.start.ew + dx; }
-      if (nw<min){ nx += (nw-min); nw=min; }
-      if (nh<min){ ny += (nh-min); nh=min; }
-      H.el.x=nx; H.el.y=ny; H.el.width=nw; H.el.height=nh;
-      updateInputs(); updateMeasurements(); draw();
-    } else if (H.type==='circle' && H.corner==='radius'){
-      const r = Math.max(10, Math.hypot(w.x - H.el.x, w.y - H.el.y));
-      H.el.radius = r; if (H.el.id==='conuco') updateInputs(); updateMeasurements(); draw();
+/* ---------- Picking & input ---------- */
+function screenToWorld(px,py){ return {x:(px-panX)/viewScale, y:(py-panY)/viewScale}; }
+function getElementAtWorld(x,y){
+  for (var i=elements.length-1;i>=0;i--){
+    var el=elements[i];
+    if(!el.draggable) continue;
+    if(el.type==='rect' && x>=el.x && x<=el.x+el.w && y>=el.y && y<=el.y+el.h) return el;
+    if(el.type==='circle' || el.type==='special'){
+      var r=(el.r||15); if(Math.hypot(x-el.x,y-el.y)<=r+(el.type==='special'?18:15)) return el;
     }
-    return;
   }
-  if (dragging){
-    dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY; updateInputs(); updateMeasurements(); draw(); return;
+  return null;
+}
+function getCanvasCoordsClient(cx,cy){ var r=canvas.getBoundingClientRect(); return {x:(cx-r.left), y:(cy-r.top)}; }
+
+/* Mouse */
+canvas.addEventListener('mousedown', function(e){
+  var p=getCanvasCoordsClient(e.clientX,e.clientY);
+  // check handles first
+  var h = hitTestHandle(p.x*devicePixelRatio, p.y*devicePixelRatio);
+  if (h){ resizing=h; return; }
+
+  var w=screenToWorld(p.x,p.y);
+  var el=getElementAtWorld(w.x,w.y);
+  if(el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
+  else { panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=Date.now(); lastMoveX=p.x; lastMoveY=p.y; }
+
+  var now=Date.now(); if(now-lastTap<280){ zoomAt(p.x,p.y,1.6);} lastTap=now;
+});
+window.addEventListener('mousemove', function(e){
+  var p=getCanvasCoordsClient(e.clientX,e.clientY);
+  if(resizing){ handleResize(p); return; }
+  if(dragging){
+    var w=screenToWorld(p.x,p.y);
+    dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY;
+    updateMeasurements(); draw(); return;
   }
-  if (panning){
-    const now=Date.now(); inertiaVX=(p.x-lastMoveX)/Math.max(1,now-lastMoveTime); inertiaVY=(p.y-lastMoveY)/Math.max(1,now-lastMoveTime);
+  if(panning){
+    var now=Date.now();
+    inertiaVX=(p.x-lastMoveX)/Math.max(1,now-lastMoveTime);
+    inertiaVY=(p.y-lastMoveY)/Math.max(1,now-lastMoveTime);
     lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y;
     panX=p.x-panStartX; panY=p.y-panStartY; draw();
   }
 });
-window.addEventListener('mouseup', ()=>{
+window.addEventListener('mouseup', function(){
   if(panning) startInertia();
-  dragging=null; panning=false; activeHandle=null;
+  dragging=null; panning=false; resizing=null;
 });
 
-/* touch */
-canvas.addEventListener('touchstart', e=>{
-  if (e.touches.length===1){
-    const t=e.touches[0], r=canvas.getBoundingClientRect(), p={x:t.clientX-r.left,y:t.clientY-r.top}, w=screenToWorld(p.x,p.y);
-    const el = elementAt(w.x,w.y);
-    if (el && el.resizable){
-      const h = getHandleHit(el, w.x, w.y);
-      if (h){ activeHandle={el,...h,start:{x:w.x,y:w.y,ex:el.x,ey:el.y,ew:el.width,eh:el.height,er:el.radius}}; e.preventDefault(); return; }
-    }
-    if (el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
+/* Touch */
+canvas.addEventListener('touchstart', function(e){
+  var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY);
+  var h=hitTestHandle(p.x*devicePixelRatio, p.y*devicePixelRatio);
+  if (h){ resizing=h; e.preventDefault(); return; }
+
+  if(e.touches.length===1){
+    var w=screenToWorld(p.x,p.y), el=getElementAtWorld(w.x,w.y);
+    if(el){ dragging=el; dragOffX=w.x-el.x; dragOffY=w.y-el.y; }
     else { panning=true; panStartX=p.x-panX; panStartY=p.y-panY; inertiaVX=inertiaVY=0; lastMoveTime=Date.now(); lastMoveX=p.x; lastMoveY=p.y; }
-    const now=Date.now(); if (now-lastTap<350){ zoomAt(p.x,p.y,1.6); e.preventDefault(); } lastTap=now;
-  } else if (e.touches.length===2){
+    var now=Date.now(); if(now-lastTap<320){ zoomAt(p.x,p.y,1.6); e.preventDefault(); } lastTap=now;
+  } else if(e.touches.length===2){
     pinching=true; dragging=null; panning=false;
-    const a=e.touches[0], b=e.touches[1];
-    pinchStartDist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY); pinchStartScale=viewScale;
-    const cx=(a.clientX+b.clientX)/2, cy=(a.clientY+b.clientY)/2, r=canvas.getBoundingClientRect();
-    pinchFocalX=cx-r.left; pinchFocalY=cy-r.top;
+    var a=e.touches[0], b=e.touches[1];
+    pinchStartDist=Math.hypot(b.clientX-a.clientX, b.clientY-a.clientY);
+    pinchStartScale=viewScale;
+    var cx=(a.clientX+b.clientX)/2, cy=(a.clientY+b.clientY)/2, q=getCanvasCoordsClient(cx,cy);
+    pinchFocalX=q.x; pinchFocalY=q.y;
   }
 },{passive:false});
-canvas.addEventListener('touchmove', e=>{
-  if (pinching && e.touches.length===2){
+
+canvas.addEventListener('touchmove', function(e){
+  if(resizing){ var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY); handleResize(p); e.preventDefault(); return; }
+  if(pinching && e.touches.length===2){
     e.preventDefault();
-    const a=e.touches[0], b=e.touches[1];
-    const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
-    const factor=dist/pinchStartDist;
+    var a=e.touches[0], b=e.touches[1];
+    var dist=Math.hypot(b.clientX-a.clientX, b.clientY-a.clientY);
+    var factor=dist/pinchStartDist;
     setZoomAt(pinchFocalX,pinchFocalY, pinchStartScale*factor);
-  } else if (e.touches.length===1){
-    const t=e.touches[0], r=canvas.getBoundingClientRect(), p={x:t.clientX-r.left,y:t.clientY-r.top}, w=screenToWorld(p.x,p.y);
-    if (activeHandle){
-      const H=activeHandle;
-      if (H.type==='rect'){
-        let nx=H.el.x, ny=H.el.y, nw=H.el.width, nh=H.el.height;
-        const min=24, dx=w.x-H.start.x, dy=w.y-H.start.y;
-        if (H.corner.includes('n')){ ny = H.start.ey + dy; nh = H.start.eh - dy; }
-        if (H.corner.includes('s')){ nh = H.start.eh + dy; }
-        if (H.corner.includes('w')){ nx = H.start.ex + dx; nw = H.start.ew - dx; }
-        if (H.corner.includes('e')){ nw = H.start.ew + dx; }
-        if (nw<min){ nx += (nw-min); nw=min; }
-        if (nh<min){ ny += (nh-min); nh=min; }
-        H.el.x=nx; H.el.y=ny; H.el.width=nw; H.el.height=nh;
-        updateInputs(); updateMeasurements(); draw();
-      } else if (H.type==='circle'){
-        H.el.radius = Math.max(10, Math.hypot(w.x-H.el.x, w.y-H.el.y));
-        if (H.el.id==='conuco') updateInputs(); updateMeasurements(); draw();
-      }
-      e.preventDefault(); return;
-    }
-    if (dragging){
-      dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY; updateInputs(); updateMeasurements(); draw(); e.preventDefault(); return;
-    }
-    if (panning){
-      const now=Date.now(); inertiaVX=(p.x-lastMoveX)/Math.max(1,now-lastMoveTime); inertiaVY=(p.y-lastMoveY)/Math.max(1,now-lastMoveTime);
+  } else if(e.touches.length===1 && (dragging||panning)){
+    e.preventDefault();
+    var t=e.touches[0], p=getCanvasCoordsClient(t.clientX,t.clientY);
+    if(dragging){
+      var w=screenToWorld(p.x,p.y);
+      dragging.x=w.x - dragOffX; dragging.y=w.y - dragOffY;
+      updateMeasurements(); draw();
+    } else {
+      var now=Date.now();
+      inertiaVX=(p.x-lastMoveX)/Math.max(1,now-lastMoveTime);
+      inertiaVY=(p.y-lastMoveY)/Math.max(1,now-lastMoveTime);
       lastMoveTime=now; lastMoveX=p.x; lastMoveY=p.y;
-      panX=p.x - panStartX; panY=p.y - panStartY; draw(); e.preventDefault();
+      panX=p.x-panStartX; panY=p.y-panStartY; draw();
     }
   }
 },{passive:false});
-canvas.addEventListener('touchend', ()=>{
+
+canvas.addEventListener('touchend', function(){
   if(panning && !pinching) startInertia();
-  pinching=false; dragging=null; panning=false; activeHandle=null;
+  pinching=false; dragging=null; panning=false; resizing=null;
 });
 
-/* ========= Zoom & Inertia ========= */
-function clamp(v,lo,hi){ return
+/* Wheel zoom */
+canvas.addEventListener('wheel', function(e){
+  e.preventDefault();
+  var p=getCanvasCoordsClient(e.clientX,e.clientY);
+  zoomAt(p.x,p.y, e.deltaY<0 ? 1.1 : 1/1.1);
+},{passive:false});
+
+/* ---------- Resize logic ---------- */
+function handleResize(p){
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  var w = screenToWorld(p.x,p.y);
+  var el = resizing.el;
+
+  if(resizing.kind==='rect'){
+    var min=20;
+    var left=el.x, right=el.x+el.w, top=el.y, bottom=el.y+el.h;
+
+    function setLeft(nx){ left = Math.min(nx, right-min); el.w = right-left; el.x=left; }
+    function setRight(nx){ right= Math.max(nx, left+min); el.w = right-left; }
+    function setTop(ny){ top = Math.min(ny, bottom-min); el.h = bottom-top; el.y=top; }
+    function setBottom(ny){ bottom= Math.max(ny, top+min); el.h = bottom-top; }
+
+    var h=resizing.handle;
+    if(h.indexOf('w')!==-1) setLeft(w.x);
+    if(h.indexOf('e')!==-1) setRight(w.x);
+    if(h.indexOf('n')!==-1) setTop(w.y);
+    if(h.indexOf('s')!==-1) setBottom(w.y);
+  } else { // circle radius
+    el.r = Math.max(6, Math.abs(w.x - el.x)); // handle along east-west
+  }
+  updateMeasurements(); draw();
+}
+
+/* ---------- Zoom helpers ---------- */
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
+function setZoomAt(fx,fy,newScale){
+  newScale=clamp(newScale,MIN_SCALE,MAX_SCALE);
+  var worldX=(fx - panX)/viewScale, worldY=(fy - panY)/viewScale;
+  viewScale=newScale;
+  panX = fx - worldX*viewScale;
+  panY = fy - worldY*viewScale;
+  draw();
+}
+function zoomAt(fx,fy,factor){ setZoomAt(fx,fy,viewScale*factor); }
+
+/* ---------- Inertia ---------- */
+function startInertia(){
+  if(inertiaId) cancelAnimationFrame(inertiaId);
+  var decay=0.92, minSpeed=0.02, last=performance.now();
+  function step(t){
+    var dt=Math.max(0.016,(t-last)/16.67); last=t;
+    panX += inertiaVX*16.67*dt; panY += inertiaVY*16.67*dt;
+    inertiaVX *= Math.pow(decay,dt); inertiaVY *= Math.pow(decay,dt);
+    draw();
+    if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step);
+    else inertiaId=0;
+  }
+  if(Math.abs(inertiaVX)+Math.abs(inertiaVY)>minSpeed) inertiaId=requestAnimationFrame(step);
+}
+
+/* ---------- Mini-map & Fit ---------- */
+function getWorldBounds(){
+  var minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for (var i=0;i<elements.length;i++){
+    var e=elements[i];
+    if(e.type==='rect'){ minX=Math.min(minX,e.x); minY=Math.min(minY,e.y); maxX=Math.max(maxX,e.x+e.w); maxY=Math.max(maxY,e.y+e.h); }
+    else { var r=e.r||15; minX=Math.min(minX,e.x-r); minY=Math.min(minY,e.y-r); maxX=Math.max(maxX,e.x+r); maxY=Math.max(maxY,e.y+r); }
+  }
+  return {minX:minX,minY:minY,maxX:maxX,maxY:maxY};
+}
+function drawMiniMap(){
+  var dpr=Math.max(1,window.devicePixelRatio||1);
+  mctx.setTransform(1,0,0,1,0,0); mctx.clearRect(0,0,mini.width,mini.height);
+  var b=getWorldBounds(), WW=b.maxX-b.minX, WH=b.maxY-b.minY;
+  var pad=6*dpr, vw=mini.width-pad*2, vh=mini.height-pad*2, s=Math.min(vw/WW, vh/WH);
+  var ox=pad - b.minX*s, oy=pad - b.minY*s;
+  mctx.strokeStyle='#333'; mctx.lineWidth=1*dpr;
+  mctx.strokeRect(b.minX*s+ox, b.minY*s+oy, WW*s, WH*s);
+  for (var i=0;i<elements.length;i++){
+    var e=elements[i]; mctx.strokeStyle='#666';
+    if(e.type==='rect'){ mctx.strokeRect(e.x*s+ox, e.y*s+oy, e.w*s, e.h*s); }
+    else { var r=(e.r||15)*s; mctx.beginPath(); mctx.arc(e.x*s+ox, e.y*s+oy, r, 0, Math.PI*2); mctx.stroke(); }
+  }
+  var rect=canvas.getBoundingClientRect(), cssW=rect.width, cssH=rect.height;
+  var tlx=(-panX)/viewScale, tly=(-panY)/viewScale, brx=(cssW-panX)/viewScale, bry=(cssH-panY)/viewScale;
+  mctx.strokeStyle='#0a84ff'; mctx.lineWidth=2*dpr;
+  mctx.strokeRect(tlx*s+ox, tly*s+oy, (brx-tlx)*s, (bry-tly)*s);
+}
+function fitToExtents(){
+  var b=getWorldBounds(), rect=canvas.getBoundingClientRect(), pad=40;
+  var viewW=rect.width-pad*2, viewH=rect.height-pad*2;
+  var s=Math.min(viewW/(b.maxX-b.minX), viewH/(b.maxY-b.minY));
+  s=clamp(s, MIN_SCALE, MAX_SCALE);
+  var cx=(b.minX+b.maxX)/2, cy=(b.minY+b.maxY)/2;
+  viewScale=s; panX=rect.width/2 - cx*viewScale; panY=rect.height/2 - cy*viewScale; draw();
+}
+
+/* ---------- Reset & resizing ---------- */
+function resetToResearch(){
+  panX=panY=0; viewScale=1;
+  createElements(); draw();
+}
+
+/* ---------- Resize observer ---------- */
+function resizeCanvas(){
+  var rect=wrapper.getBoundingClientRect(), dpr=Math.max(1,window.devicePixelRatio||1);
+  canvas.width=Math.max(1,Math.floor(rect.width*dpr));
+  canvas.height=Math.max(1,Math.floor(rect.height*dpr));
+  var mr=mini.getBoundingClientRect();
+  mini.width=Math.max(1,Math.floor(mr.width*dpr));
+  mini.height=Math.max(1,Math.floor(mr.height*dpr));
+  CENTER_X=rect.width/2; CENTER_Y=rect.height/2;
+  draw();
+}
+if(window.ResizeObserver){ new ResizeObserver(resizeCanvas).observe(wrapper); }
+else { window.addEventListener('resize',resizeCanvas); window.addEventListener('orientationchange',resizeCanvas); }
+
+/* ---------- Init ---------- */
+createElements();
+resizeCanvas();
+draw();
+</script>
+</body>
+</html>
